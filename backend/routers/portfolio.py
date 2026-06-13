@@ -12,6 +12,7 @@ from services.portfolio_service import (
     compute_benchmark_comparison, compute_risk_metrics,
 )
 from services.concentration_service import compute_concentration
+from services.exposure_service import compute_exposure
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
@@ -106,6 +107,40 @@ async def portfolio_concentration(
     user: User = Depends(get_current_user),
 ):
     return await compute_concentration(db, user.id)
+
+
+@router.get("/exposure")
+async def portfolio_exposure(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return await compute_exposure(db, user.id)
+
+
+@router.post("/refresh-compositions")
+async def refresh_compositions(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Manually trigger MF composition refresh for the current user's MFs."""
+    from models import MutualFund
+    from sqlalchemy import select as sa_select
+    from services.composition_service import get_or_refresh_all
+
+    result = await db.execute(
+        sa_select(MutualFund.scheme_code).where(
+            MutualFund.user_id == user.id,
+            MutualFund.is_active == True,
+            MutualFund.scheme_code.isnot(None),
+        )
+    )
+    scheme_codes = {row[0] for row in result if row[0]}
+    results = await get_or_refresh_all(db, scheme_codes)
+    return {
+        "schemes_processed": len(results),
+        "total_rows": sum(results.values()),
+        "detail": results,
+    }
 
 
 @router.get("/snapshots")

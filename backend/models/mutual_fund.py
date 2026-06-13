@@ -51,6 +51,7 @@ class MutualFund(Base):
     def metadata_(self) -> dict:
         return {
             "isin": self.isin,
+            "scheme_code": self.scheme_code,
             "folio_number": self.folio_number,
             "units": float(self.units) if self.units else 0,
             "current_nav": float(self.current_nav) if self.current_nav else 0,

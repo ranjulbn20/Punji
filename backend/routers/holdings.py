@@ -6,12 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from database import get_db
-from models import User, INSTRUMENT_MODEL_MAP
+from models import User, Stock, StockTrade, INSTRUMENT_MODEL_MAP
 from schemas.holding import HoldingCreate, HoldingUpdate, HoldingOut
 from dependencies import get_current_user
 from services.instrument_service import (
     get_all_instruments, get_instrument_by_id, build_instrument_from_dto,
 )
+from services.portfolio_service import compute_instrument_xirr
 
 router = APIRouter(prefix="/api/holdings", tags=["holdings"])
 
@@ -120,9 +121,52 @@ async def refresh_holding(
         if new_value is not None:
             h.current_value = new_value
             h.last_refreshed_at = datetime.now(timezone.utc)
-            await db.commit()
 
-    return {"current_value": float(h.current_value), "last_refreshed_at": h.last_refreshed_at}
+    xirr = await compute_instrument_xirr(db, h)
+    if xirr is not None:
+        h.xirr = xirr
+
+    await db.commit()
+    return {"current_value": float(h.current_value), "xirr": h.xirr, "last_refreshed_at": h.last_refreshed_at}
+
+
+@router.get("/{holding_id}/trades")
+async def list_stock_trades(
+    holding_id: uuid.UUID,
+    instrument_type: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return individual trade history for a stock holding."""
+    if instrument_type != "stock":
+        return []
+
+    stock = await db.execute(
+        select(Stock).where(Stock.id == holding_id, Stock.user_id == user.id)
+    )
+    if not stock.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Holding not found")
+
+    result = await db.execute(
+        select(StockTrade)
+        .where(StockTrade.stock_id == holding_id)
+        .order_by(StockTrade.trade_date.desc())
+    )
+    trades = result.scalars().all()
+    return [
+        {
+            "id": str(t.id),
+            "trade_date": t.trade_date.isoformat(),
+            "trade_type": t.trade_type,
+            "quantity": float(t.quantity),
+            "price": float(t.price),
+            "amount": float(t.amount),
+            "exchange": t.exchange,
+            "segment": t.segment,
+            "trade_id": t.trade_id,
+        }
+        for t in trades
+    ]
 
 
 # ── Internal helper ───────────────────────────────────────────────────────────

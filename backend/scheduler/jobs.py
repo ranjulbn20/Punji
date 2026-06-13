@@ -148,13 +148,20 @@ async def _refresh_amfi_compositions() -> None:
     """Monthly 1st 03:00 IST — refresh AMFI fund portfolio compositions."""
     async with AsyncSessionLocal() as db:
         from models import MutualFund
+        from services.composition_service import get_or_refresh_all
 
         result = await db.execute(
-            select(MutualFund.isin).where(MutualFund.is_active == True)
+            select(MutualFund.scheme_code).where(
+                MutualFund.is_active == True,
+                MutualFund.scheme_code.isnot(None),
+            )
         )
         scheme_codes = {row[0] for row in result if row[0]}
+        print(f"[Scheduler] Refreshing AMFI compositions for {len(scheme_codes)} schemes")
+        results = await get_or_refresh_all(db, scheme_codes)
+        total = sum(results.values())
         _mark("amfi")
-        print(f"[Scheduler] Refreshing AMFI compositions for {len(scheme_codes)} scheme codes")
+        print(f"[Scheduler] AMFI composition refresh done: {total} rows across {len(results)} schemes")
 
 
 # ── watchdog ─────────────────────────────────────────────────────────────────

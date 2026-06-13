@@ -12,6 +12,7 @@ class FundComposition(Base):
     scheme_code: Mapped[int] = mapped_column(Integer, nullable=False)
     company_isin: Mapped[str] = mapped_column(String(20), nullable=False)
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sector: Mapped[str | None] = mapped_column(String(100), nullable=True)
     weight_pct: Mapped[float] = mapped_column(Numeric(6, 3), nullable=False)
     disclosure_month: Mapped[Date] = mapped_column(Date, nullable=False)
 

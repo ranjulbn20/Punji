@@ -9,7 +9,7 @@ from scipy import optimize
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from models import Transaction, Goal, RiskProfile, PortfolioSnapshot
+from models import Transaction, StockTrade, Goal, RiskProfile, PortfolioSnapshot
 from services.instrument_service import get_all_instruments
 from config import settings
 
@@ -45,19 +45,30 @@ def compute_xirr(cashflows: list[tuple[date, float]]) -> Optional[float]:
 
 
 async def compute_instrument_xirr(db: AsyncSession, instrument) -> Optional[float]:
-    result = await db.execute(
-        select(Transaction)
-        .where(
-            Transaction.instrument_type == instrument.instrument_type,
-            Transaction.instrument_id == instrument.id,
+    if instrument.instrument_type == "stock":
+        result = await db.execute(
+            select(StockTrade)
+            .where(StockTrade.stock_id == instrument.id)
+            .order_by(StockTrade.trade_date)
         )
-        .order_by(Transaction.transaction_date)
-    )
-    transactions = result.scalars().all()
-    if not transactions:
-        return None
+        trades = result.scalars().all()
+        if not trades:
+            return None
+        cashflows = [(t.trade_date, float(t.amount)) for t in trades]
+    else:
+        result = await db.execute(
+            select(Transaction)
+            .where(
+                Transaction.instrument_type == instrument.instrument_type,
+                Transaction.instrument_id == instrument.id,
+            )
+            .order_by(Transaction.transaction_date)
+        )
+        transactions = result.scalars().all()
+        if not transactions:
+            return None
+        cashflows = [(tx.transaction_date, float(tx.amount)) for tx in transactions]
 
-    cashflows = [(tx.transaction_date, float(tx.amount)) for tx in transactions]
     cashflows.append((date.today(), -float(instrument.current_value)))
     return compute_xirr(cashflows)
 

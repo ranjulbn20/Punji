@@ -35,6 +35,7 @@ interface PlatformConfig {
   tag: string;
   hint: string;
   acceptsPdf: boolean;
+  acceptsXlsx: boolean;
 }
 
 const MF_PLATFORMS: PlatformConfig[] = [
@@ -44,6 +45,7 @@ const MF_PLATFORMS: PlatformConfig[] = [
     tag: "All AMCs",
     hint: "Password-protected PDF from mycams.com or kfintech.com — password is your PAN (e.g. ABCDE1234F)",
     acceptsPdf: true,
+    acceptsXlsx: false,
   },
   {
     id: "groww_mf",
@@ -51,6 +53,7 @@ const MF_PLATFORMS: PlatformConfig[] = [
     tag: "Groww MF",
     hint: "Holdings CSV: groww.in → Portfolio → Mutual Funds → Download",
     acceptsPdf: false,
+    acceptsXlsx: false,
   },
   {
     id: "kuvera",
@@ -58,6 +61,7 @@ const MF_PLATFORMS: PlatformConfig[] = [
     tag: "Kuvera MF",
     hint: "Holdings CSV: kuvera.in → Portfolio → Current Holdings → Export CSV",
     acceptsPdf: false,
+    acceptsXlsx: false,
   },
 ];
 
@@ -66,15 +70,17 @@ const STOCK_PLATFORMS: PlatformConfig[] = [
     id: "zerodha_holdings",
     name: "Zerodha Holdings",
     tag: "Snapshot",
-    hint: "Holdings CSV: console.zerodha.com → Portfolio → Holdings → ↓ Download",
+    hint: "Holdings CSV or XLSX: console.zerodha.com → Portfolio → Holdings → ↓ Download",
     acceptsPdf: false,
+    acceptsXlsx: true,
   },
   {
     id: "zerodha_tradebook",
     name: "Zerodha Tradebook",
     tag: "Full history",
-    hint: "For accurate XIRR: console.zerodha.com → Reports → Tradebook → Download",
+    hint: "For accurate XIRR: console.zerodha.com → Reports → Tradebook → Download (CSV or XLSX)",
     acceptsPdf: false,
+    acceptsXlsx: true,
   },
   {
     id: "groww_stocks",
@@ -82,6 +88,7 @@ const STOCK_PLATFORMS: PlatformConfig[] = [
     tag: "Groww Stocks",
     hint: "Holdings CSV: groww.in → Portfolio → Stocks → Download",
     acceptsPdf: false,
+    acceptsXlsx: false,
   },
 ];
 
@@ -312,14 +319,14 @@ export default function HoldingsPage() {
                   <p className="font-medium">Drag & drop your {selectedPlatform.name} file here</p>
                   <p className="mt-1 text-sm text-muted-foreground max-w-sm">{selectedPlatform.hint}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Accepts: {selectedPlatform.acceptsPdf ? "CSV or PDF" : "CSV"}
+                    Accepts: {selectedPlatform.acceptsPdf ? "CSV or PDF" : selectedPlatform.acceptsXlsx ? "CSV or XLSX" : "CSV"}
                   </p>
                 </div>
                 <Button variant="outline" onClick={() => fileRef.current?.click()}>Browse file</Button>
                 <input
                   ref={fileRef}
                   type="file"
-                  accept={selectedPlatform.acceptsPdf ? ".csv,.pdf" : ".csv"}
+                  accept={selectedPlatform.acceptsPdf ? ".csv,.pdf" : selectedPlatform.acceptsXlsx ? ".csv,.xlsx" : ".csv"}
                   className="hidden"
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
                 />

@@ -1,7 +1,7 @@
 import csv
 import io
 from datetime import date
-from .base import CSVImporter, HoldingDTO, TransactionDTO
+from .base import CSVImporter, HoldingDTO, TransactionDTO  # TransactionDTO kept for GrowwMFImporter
 
 
 def _f(s: str) -> float:
@@ -33,15 +33,8 @@ class GrowwStocksImporter(CSVImporter):
                     "average_price": avg_price,
                     "current_price": cur_price,
                 },
-                transactions=[
-                    TransactionDTO(
-                        transaction_date=date.today(),
-                        transaction_type="buy",
-                        amount=invested,
-                        units=qty,
-                        price=avg_price,
-                    )
-                ],
+                # No stock_trades: this is a position snapshot with no real trade dates.
+                # XIRR will be null until a tradebook is imported.
                 confidence_score=0.9,
             ))
         return holdings

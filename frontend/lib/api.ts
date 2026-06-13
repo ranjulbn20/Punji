@@ -65,6 +65,11 @@ export const api = {
     allocation: () => apiFetch("/api/portfolio/allocation"),
     performance: (period = "1y") => apiFetch(`/api/portfolio/performance?period=${period}`),
     concentration: () => apiFetch("/api/portfolio/concentration"),
+    exposure: () => apiFetch<PortfolioExposure>("/api/portfolio/exposure"),
+    refreshCompositions: () =>
+      apiFetch<{ schemes_processed: number; total_rows: number }>("/api/portfolio/refresh-compositions", {
+        method: "POST",
+      }),
     snapshots: (from?: string, to?: string) => {
       const q = new URLSearchParams();
       if (from) q.set("from_date", from);
@@ -204,3 +209,31 @@ export interface Transaction { id: string; holding_id: string; transaction_date:
 export interface Goal { id: string; name: string; target_amount: number; target_date: string; success_probability?: number; monthly_sip_allocated: number; }
 export interface Alert { id: string; alert_type: string; severity: string; title: string; message: string; is_read: boolean; created_at: string; }
 export interface PortfolioSummary { total_value: number; total_invested: number; total_pnl_amount: number; total_pnl_pct: number; portfolio_xirr?: number; allocation: object; drift: object; benchmarks: object; unread_alerts_count: number; }
+
+export interface ExposureSource {
+  label: string;
+  pct: number;
+  instrument_type: string;
+}
+export interface StockExposure {
+  isin: string;
+  name: string;
+  sector: string;
+  total_pct: number;
+  direct_pct: number;
+  indirect_pct: number;
+  sources: ExposureSource[];
+}
+export interface SectorExposure {
+  sector: string;
+  total_pct: number;
+  direct_pct: number;
+  indirect_pct: number;
+}
+export interface PortfolioExposure {
+  total_value: number;
+  by_stock: StockExposure[];
+  by_sector: SectorExposure[];
+  mf_without_composition: Array<{ name: string; pct_of_portfolio: number }>;
+  last_composition_date: string | null;
+}

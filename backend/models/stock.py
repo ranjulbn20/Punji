@@ -16,6 +16,7 @@ class Stock(Base):
     symbol: Mapped[str] = mapped_column(String(30), nullable=False)     # e.g. "AIRTEL.NS"
     isin: Mapped[str] = mapped_column(String(20), nullable=False, default="")
     exchange: Mapped[str] = mapped_column(String(10), nullable=False, default="NSE")
+    sector: Mapped[str | None] = mapped_column(String(100), nullable=True)
     quantity: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False, default=0)
     avg_price: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
     current_price: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
@@ -31,6 +32,7 @@ class Stock(Base):
 
     user: Mapped["User"] = relationship("User")
     goal: Mapped["Goal | None"] = relationship("Goal")
+    trades: Mapped[list["StockTrade"]] = relationship("StockTrade", back_populates="stock", cascade="all, delete-orphan")
 
     # --- Common interface (duck-typed by HoldingOut) ---
     @property
@@ -51,6 +53,7 @@ class Stock(Base):
             "symbol": self.symbol,
             "isin": self.isin,
             "exchange": self.exchange,
+            "sector": self.sector,
             "quantity": float(self.quantity) if self.quantity else 0,
             "average_price": float(self.avg_price) if self.avg_price else 0,
             "current_price": float(self.current_price) if self.current_price else 0,

@@ -136,6 +136,29 @@ connectors/  → Broker API connectors (stubs only — not implemented)
 | `/scenarios` | Preset + custom what-if inputs, P10/P50/P90 Monte Carlo results per goal |
 | `/settings` | Profile, theme (dark/light/system), agent memory management, import history, danger zone |
 
+## Working style
+
+- **Always ask before assuming.** If a task has ambiguity — about scope, behaviour, edge cases, or intent — ask a clarifying question before writing any code. Do not make assumptions and proceed; the cost of a wrong assumption is higher than the cost of one question.
+- This applies especially to: data model changes, deletions, migrations, UI behaviour, and anything that affects existing user data.
+
+## Design principles
+
+Follow these principles when designing or extending any part of the codebase.
+
+- Follow SOLID principles, especially **Open/Closed** (OCP) and **Dependency Inversion** (DIP).
+- Before writing a service, identify what is likely to vary in the future and isolate it behind an interface.
+- Assume external integrations (communication, payments, storage, auth, search, data providers, broker connectors, etc.) will have multiple implementations over time.
+- Depend on abstractions, not concrete implementations.
+- Prefer extensible designs over minimal code — a new implementation should be addable with minimal or no changes to existing business logic.
+- Prefer **Strategy Pattern** for varying behaviour and **Factory/Registry Pattern** for implementation selection.
+- Avoid hard-coded provider-specific logic and large if-else/switch chains for choosing implementations.
+
+**Before finalising any design, answer:**
+
+1. What are the extension points?
+2. How would a new implementation be added?
+3. What existing code would remain unchanged?
+
 ## Key conventions
 
 - **Monetary values:** Stored as **rupees** (`Numeric(15,2)`) in the DB and returned as rupees from the API. The `fmt()` helper in each page component handles lakh/crore formatting directly on the rupee value — no division needed.

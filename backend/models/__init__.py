@@ -6,6 +6,7 @@ from .fixed_deposit import FixedDeposit
 from .ppf import PPFAccount
 from .nps import NPSAccount
 from .transaction import Transaction
+from .stock_trade import StockTrade
 from .goal import Goal
 from .alert import Alert
 from .agent_memory import AgentMemory
@@ -21,7 +22,7 @@ from .holding import Holding
 __all__ = [
     "User", "RiskProfile",
     "Stock", "MutualFund", "FixedDeposit", "PPFAccount", "NPSAccount",
-    "Transaction", "Goal", "Alert", "AgentMemory", "PortfolioSnapshot",
+    "Transaction", "StockTrade", "Goal", "Alert", "AgentMemory", "PortfolioSnapshot",
     "FundComposition", "BusinessGroupMapping", "ImportJob",
     "Conversation", "ConversationMessage",
     "Holding",  # legacy

@@ -49,8 +49,8 @@ async def get_instrument_by_id(db: AsyncSession, user_id, instrument_type: str, 
 async def find_existing_instrument(db: AsyncSession, user_id, dto: dict):
     """
     Dedup lookup before creating an instrument on import.
-    Stocks match by symbol. MFs match by scheme_name + folio_number.
-    Others match by display_name.
+    Stocks match by symbol first, then fall back to ISIN (handles renamed tickers like ZOMATO→ETERNAL).
+    MFs match by scheme_name + folio_number. Others match by display_name.
     """
     instrument_type = dto["instrument_type"]
     meta = dto.get("metadata", {})
@@ -64,7 +64,21 @@ async def find_existing_instrument(db: AsyncSession, user_id, dto: dict):
                 Stock.symbol == symbol,
             )
         )
-        return result.scalar_one_or_none()
+        match = result.scalar_one_or_none()
+        if match:
+            return match
+        # Fallback: match by ISIN for renamed stocks (e.g. ZOMATO → ETERNAL, SHRIRAMTRANS → SHRIRAMFIN)
+        isin = meta.get("isin", "")
+        if isin:
+            result = await db.execute(
+                select(Stock).where(
+                    Stock.user_id == user_id,
+                    Stock.is_active == True,
+                    Stock.isin == isin,
+                )
+            )
+            return result.scalar_one_or_none()
+        return None
 
     if instrument_type == "mutual_fund":
         folio = meta.get("folio_number", "")

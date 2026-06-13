@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str
     google_ai_api_key: str
+    openai_api_key: str = ""
     qdrant_url: str
     qdrant_api_key: str
     news_api_key: str

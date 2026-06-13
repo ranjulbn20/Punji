@@ -15,7 +15,7 @@ from services.auth_service import (
     create_access_token, create_refresh_token, decode_token,
     derive_risk_profile,
 )
-from services.market_service import refresh_mf_navs_bg
+from services.market_service import refresh_mf_navs_bg, refresh_stock_prices_bg
 from dependencies import get_current_user
 from jose import JWTError
 
@@ -54,6 +54,7 @@ async def login(body: LoginRequest, background_tasks: BackgroundTasks, db: Async
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     background_tasks.add_task(refresh_mf_navs_bg, str(user.id))
+    background_tasks.add_task(refresh_stock_prices_bg, str(user.id))
     token_data = {"sub": str(user.id)}
     return TokenPair(
         access_token=create_access_token(token_data),
@@ -104,6 +105,7 @@ async def google_auth(body: GoogleAuthRequest, background_tasks: BackgroundTasks
 
     if not is_new:
         background_tasks.add_task(refresh_mf_navs_bg, str(user.id))
+        background_tasks.add_task(refresh_stock_prices_bg, str(user.id))
     token_data = {"sub": str(user.id)}
     return {
         "access_token": create_access_token(token_data),

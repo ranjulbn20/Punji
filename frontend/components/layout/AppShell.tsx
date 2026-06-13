@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Briefcase, Target, Bell, MessageSquare,
-  FlaskConical, Settings, LogOut, ChevronLeft, ChevronRight, Menu,
+  FlaskConical, Settings, LogOut, ChevronLeft, ChevronRight, Menu, Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { signOut } from "next-auth/react";
@@ -14,6 +14,7 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/holdings",  label: "Holdings",  icon: Briefcase },
+  { href: "/exposure",  label: "Exposure",  icon: Layers },
   { href: "/goals",     label: "Goals",     icon: Target },
   { href: "/alerts",    label: "Alerts",    icon: Bell },
   { href: "/chat",      label: "Chat",      icon: MessageSquare },

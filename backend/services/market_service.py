@@ -307,6 +307,94 @@ async def refresh_mf_navs_bg(user_id: str) -> None:
         print(f"[NAV refresh] Error for user {user_id}: {e}")
 
 
+async def get_stock_sector(symbol: str) -> str | None:
+    """Fetch sector for a stock symbol, cached in Redis for 7 days."""
+    r = get_redis()
+    key = f"sector:{symbol}"
+    try:
+        cached = await r.get(key)
+        if cached:
+            return cached if cached != "null" else None
+    except Exception:
+        pass
+    finally:
+        await r.aclose()
+
+    try:
+        info = yf.Ticker(symbol).info
+        sector = info.get("sector") or info.get("industryDisp") or None
+        r2 = get_redis()
+        try:
+            await r2.setex(key, 7 * 86400, sector if sector else "null")
+        except Exception:
+            pass
+        finally:
+            await r2.aclose()
+        return sector
+    except Exception:
+        return None
+
+
+async def refresh_stock_prices_for_user(db, user_id) -> int:
+    """
+    Fetch latest prices from yfinance for all active stock holdings and update
+    current_price + current_value in the DB.
+
+    Skips the refresh if every holding was updated within the last 30 minutes.
+
+    Returns the number of holdings updated.
+    """
+    from sqlalchemy import select
+    from models import Stock
+
+    result = await db.execute(
+        select(Stock).where(
+            Stock.user_id == user_id,
+            Stock.is_active == True,
+        )
+    )
+    holdings = result.scalars().all()
+    if not holdings:
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - _REFRESH_COOLDOWN
+    if all(
+        s.last_refreshed_at and s.last_refreshed_at.replace(tzinfo=timezone.utc) > cutoff
+        for s in holdings
+    ):
+        return 0
+
+    now = datetime.now(timezone.utc)
+    updated = 0
+    for stock in holdings:
+        price_data = await get_stock_price(stock.symbol)
+        if not price_data or not price_data.get("current_price"):
+            continue
+        price = price_data["current_price"]
+        stock.current_price = price
+        stock.current_value = round(float(stock.quantity) * price, 2)
+        stock.last_refreshed_at = now
+        if stock.sector is None:
+            stock.sector = await get_stock_sector(stock.symbol)
+        updated += 1
+
+    if updated:
+        await db.commit()
+    return updated
+
+
+async def refresh_stock_prices_bg(user_id: str) -> None:
+    """Background-task wrapper: creates its own DB session."""
+    from database import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as db:
+            count = await refresh_stock_prices_for_user(db, user_id)
+            if count:
+                print(f"[Stock refresh] Updated {count} stock holdings for user {user_id}")
+    except Exception as e:
+        print(f"[Stock refresh] Error for user {user_id}: {e}")
+
+
 async def get_stock_news(symbol: str) -> list[dict]:
     try:
         ticker = yf.Ticker(symbol)
