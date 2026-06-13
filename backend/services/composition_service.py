@@ -79,7 +79,9 @@ Rules:
 - weight_pct is the percentage of NAV allocated to that company (e.g. 5.2 means 5.2%).
 - All weights must be positive numbers.
 - Sector must be a concise label matching Indian market conventions.
-- If you are not confident about an ISIN, return an empty string — do NOT guess.
+- ISIN UNIQUENESS IS CRITICAL: every company has exactly one ISIN. No two entries in your list may share the same company_isin. If you are not 100% certain which ISIN belongs to a company, use empty string — never assign one company's ISIN to a different company.
+- If you are not confident about an ISIN, return an empty string. Wrong ISINs corrupt the portfolio look-through. An empty string is always safer than a guess.
+- Double-check: HDFC Bank = INE040A01034, Reliance = INE002A01018, Infosys = INE009A01021, TCS = INE467B01029, ICICI Bank = INE090A01021. If a company's ISIN does not match your confident recall, use empty string.
 """
 
     def _get_provider(self):
@@ -252,6 +254,19 @@ async def refresh_composition(
     await _enrich_sectors(entries)
 
     month_first = disclosure_month.replace(day=1)
+
+    # Deduplicate by ISIN: LLMs occasionally assign the same ISIN to two companies.
+    # PostgreSQL's ON CONFLICT DO UPDATE cannot resolve duplicates within a single
+    # INSERT batch, so we must resolve them here. Keep the highest weight entry.
+    # Skip entries with no ISIN — they can't be matched for look-through anyway.
+    seen_isin: dict[str, CompositionEntry] = {}
+    for e in entries:
+        if not e.company_name or not e.company_isin:
+            continue
+        existing = seen_isin.get(e.company_isin)
+        if existing is None or e.weight_pct > existing.weight_pct:
+            seen_isin[e.company_isin] = e
+
     rows = [
         {
             "scheme_code": scheme_code,
@@ -261,8 +276,7 @@ async def refresh_composition(
             "weight_pct": e.weight_pct,
             "disclosure_month": month_first,
         }
-        for e in entries
-        if e.company_name  # skip empty-name rows
+        for e in seen_isin.values()
     ]
     if not rows:
         return 0
