@@ -62,7 +62,7 @@ function MetricCard({
 export default function DashboardPage() {
   const router = useRouter();
   const { portfolioSummary, setPortfolioSummary } = usePunji();
-  const [perf, setPerf] = useState<{ date: string; value: number }[]>([]);
+  const [perf, setPerf] = useState<{ date: string; portfolio_value: number }[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [quickAsk, setQuickAsk] = useState("");
@@ -75,7 +75,7 @@ export default function DashboardPage() {
         api.alerts.list({ limit: "5", is_read: "false" }),
       ]);
       setPortfolioSummary(sum as PortfolioSummary);
-      setPerf(perfData as { date: string; value: number }[]);
+      setPerf((perfData as { chart_data: { date: string; portfolio_value: number }[] }).chart_data ?? []);
       setAlerts(alertData as Alert[]);
     } catch {}
     finally { setLoading(false); }
@@ -156,7 +156,7 @@ export default function DashboardPage() {
                       formatter={(v) => [fmt(Number(v)), "Value"]}
                       contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
                     />
-                    <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2} fill="url(#grad)" />
+                    <Area type="monotone" dataKey="portfolio_value" stroke="#6366f1" strokeWidth={2} fill="url(#grad)" />
                   </AreaChart>
                 </ResponsiveContainer>
               ) : (
