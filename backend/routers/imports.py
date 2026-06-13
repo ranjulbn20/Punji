@@ -8,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from database import get_db
-from models import User, ImportJob, Holding, Transaction
+from models import User, ImportJob, Transaction
 from dependencies import get_current_user
 from importers import detect_format, get_importer
+from services.instrument_service import find_existing_instrument, build_instrument_from_dto
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
@@ -19,6 +20,7 @@ router = APIRouter(prefix="/api/imports", tags=["imports"])
 async def upload_file(
     file: UploadFile = File(...),
     source_platform: str = Form("generic"),
+    password: str = Form(""),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -29,7 +31,7 @@ async def upload_file(
 
     # Detect format
     fmt = source_platform
-    if source_platform in ("generic", "other"):
+    if source_platform in ("auto", "generic", "other"):
         preview = content[:500].decode("utf-8", errors="replace")
         if file.filename and file.filename.lower().endswith(".csv"):
             try:
@@ -53,7 +55,7 @@ async def upload_file(
     # Parse in background (simplified: parse inline for now)
     importer = get_importer(fmt)
     try:
-        holdings_dtos = await importer.parse(content, file.filename or "upload.csv")
+        holdings_dtos = await importer.parse(content, file.filename or "upload.csv", password=password)
         preview_data = [
             {
                 "instrument_type": h.instrument_type,
@@ -97,10 +99,16 @@ async def get_preview(
         raise HTTPException(status_code=404, detail="Import job not found")
 
     preview = job.preview_data or {}
+    holdings = preview.get("holdings", [])
+    total_transactions = sum(h.get("transaction_count", 0) for h in holdings)
+    warnings = job.warnings or []
+    if job.source_platform == "zerodha_tradebook":
+        warnings = list(warnings) + ["Duplicate transactions from overlapping date ranges will be skipped automatically."]
     return {
         "status": job.status,
-        "holdings_parsed": preview.get("holdings", []),
-        "warnings": job.warnings,
+        "holdings": holdings,
+        "transactions": total_transactions,
+        "warnings": warnings,
         "error_message": job.error_message,
     }
 
@@ -129,39 +137,61 @@ async def confirm_import(
         if confirmed_indices and i not in confirmed_indices:
             continue
 
-        # Deduplication: check by instrument_type + key metadata field
-        existing = await _find_existing_holding(db, user.id, dto)
+        # Dedup: find existing instrument in the typed table
+        existing = await find_existing_instrument(db, user.id, dto)
         if existing:
-            existing.invested_amount = dto["invested_amount"]
-            existing.current_value = dto["current_value"]
-            existing.metadata_ = dto["metadata"]
+            # Tradebook imports only have partial history — never overwrite snapshot amounts
+            if job.source_platform != "zerodha_tradebook":
+                existing.invested_amount = dto["invested_amount"]
+                existing.current_value = dto["current_value"]
             updated += 1
-            holding = existing
+            instrument = existing
         else:
-            holding = Holding(
-                user_id=user.id,
-                instrument_type=dto["instrument_type"],
-                display_name=dto["display_name"],
-                asset_class=dto["asset_class"],
-                invested_amount=dto["invested_amount"],
-                current_value=dto["current_value"],
-                metadata_=dto["metadata"],
-            )
-            db.add(holding)
+            instrument = build_instrument_from_dto(user.id, dto)
+            db.add(instrument)
             await db.flush()
             created += 1
 
+        instrument_type = dto["instrument_type"]
+
         for tx in dto.get("transactions", []):
             from datetime import date
+            tx_date = date.fromisoformat(tx["transaction_date"])
+            tx_units = tx.get("units")
+            tx_price = tx.get("price")
+
+            # Dedup: when notes carries a trade_id use it as the unique key;
+            # otherwise match on date + type + units + price.
+            tx_notes = tx.get("notes")
+            tx_trade_id = tx_notes if (tx_notes and tx_notes.startswith("trade_id:")) else None
+
+            dup_q = select(Transaction).where(
+                Transaction.instrument_type == instrument_type,
+                Transaction.instrument_id == instrument.id,
+                Transaction.transaction_date == tx_date,
+                Transaction.transaction_type == tx["transaction_type"],
+            )
+            if tx_trade_id:
+                dup_q = dup_q.where(Transaction.notes == tx_trade_id)
+            else:
+                if tx_units is not None:
+                    dup_q = dup_q.where(Transaction.units == tx_units)
+                if tx_price is not None:
+                    dup_q = dup_q.where(Transaction.price == tx_price)
+            dup = await db.execute(dup_q)
+            if dup.scalar_one_or_none():
+                continue
+
             t = Transaction(
                 user_id=user.id,
-                holding_id=holding.id,
-                transaction_date=date.fromisoformat(tx["transaction_date"]),
+                instrument_type=instrument_type,
+                instrument_id=instrument.id,
+                transaction_date=tx_date,
                 transaction_type=tx["transaction_type"],
                 amount=tx["amount"],
-                units=tx.get("units"),
-                price=tx.get("price"),
-                notes=tx.get("notes"),
+                units=tx_units,
+                price=tx_price,
+                notes=tx_notes,
                 import_source=job.source_platform,
             )
             db.add(t)
@@ -208,13 +238,3 @@ async def import_history(
     ]
 
 
-async def _find_existing_holding(db, user_id, dto: dict):
-    from sqlalchemy import and_
-    q = select(Holding).where(
-        Holding.user_id == user_id,
-        Holding.is_active == True,
-        Holding.instrument_type == dto["instrument_type"],
-        Holding.display_name == dto["display_name"],
-    )
-    result = await db.execute(q)
-    return result.scalar_one_or_none()

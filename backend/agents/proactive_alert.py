@@ -7,7 +7,8 @@ import uuid
 from datetime import date, datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from models import Holding, Goal, Alert, RiskProfile
+from models import Goal, Alert, RiskProfile
+from services.instrument_service import get_instruments_by_type
 from services.portfolio_service import compute_allocation, compute_drift
 from agents.news_intelligence import news_intelligence_node
 from config import settings
@@ -29,8 +30,8 @@ async def _check_cooldown(db: AsyncSession, user_id: uuid.UUID, alert_type: str,
 
 async def _create_alert(db: AsyncSession, user_id: uuid.UUID, alert_type: str, severity: str,
                          title: str, message: str, reasoning: str, signal_score: int,
-                         holding_id: uuid.UUID | None = None, goal_id: uuid.UUID | None = None,
-                         metadata: dict | None = None):
+                         instrument_type: str | None = None, instrument_id: uuid.UUID | None = None,
+                         goal_id: uuid.UUID | None = None, metadata: dict | None = None):
     alert = Alert(
         user_id=user_id,
         alert_type=alert_type,
@@ -39,7 +40,8 @@ async def _create_alert(db: AsyncSession, user_id: uuid.UUID, alert_type: str, s
         message=message,
         reasoning=reasoning,
         signal_score=signal_score,
-        related_holding_id=holding_id,
+        related_instrument_type=instrument_type,
+        related_instrument_id=instrument_id,
         related_goal_id=goal_id,
         metadata_=metadata or {},
     )
@@ -76,16 +78,9 @@ async def run_proactive_alerts_for_user(db: AsyncSession, user_id_str: str):
             alerts_created += 1
 
     # 2. FD maturity alerts
-    result = await db.execute(
-        select(Holding).where(
-            Holding.user_id == user_id,
-            Holding.instrument_type == "fixed_deposit",
-            Holding.is_active == True,
-        )
-    )
-    fds = result.scalars().all()
+    fds = await get_instruments_by_type(db, user_id, "fixed_deposit")
     for fd in fds:
-        maturity_str = fd.metadata_.get("maturity_date")
+        maturity_str = str(fd.maturity_date) if fd.maturity_date else None
         if not maturity_str:
             continue
         try:
@@ -110,11 +105,11 @@ async def run_proactive_alerts_for_user(db: AsyncSession, user_id_str: str):
             await _create_alert(
                 db, user_id, "fd_maturity", "critical" if days_left <= 7 else "significant",
                 f"FD maturing in {days_left} days — {fd.display_name}",
-                f"Your Fixed Deposit with {fd.metadata_.get('bank_name', 'your bank')} "
+                f"Your Fixed Deposit with {fd.bank_name or 'your bank'} "
                 f"matures on {maturity_str}. Plan your reinvestment strategy now.",
                 f"Days to maturity: {days_left}. Signal score: {score}/10.",
                 min(score, 10),
-                holding_id=fd.id,
+                instrument_type="fixed_deposit", instrument_id=fd.id,
                 metadata={"days_to_maturity": days_left, "maturity_date": maturity_str},
             )
             alerts_created += 1
@@ -156,14 +151,7 @@ async def run_proactive_alerts_for_user(db: AsyncSession, user_id_str: str):
     alloc = await compute_allocation(db, user_id)
     total = alloc.get("total_value", 0)
     if total > 0:
-        stock_result = await db.execute(
-            select(Holding).where(
-                Holding.user_id == user_id,
-                Holding.instrument_type == "stock",
-                Holding.is_active == True,
-            )
-        )
-        for stock in stock_result.scalars().all():
+        for stock in await get_instruments_by_type(db, user_id, "stock"):
             pct = stock.current_value / total * 100
             if pct > 15:
                 score = 9
@@ -183,7 +171,7 @@ async def run_proactive_alerts_for_user(db: AsyncSession, user_id_str: str):
                     "Single-stock concentration above 10% increases risk significantly.",
                     f"Stock: {pct:.1f}% of portfolio. Threshold: 10%. Signal score: {score}/10.",
                     min(score, 10),
-                    holding_id=stock.id,
+                    instrument_type="stock", instrument_id=stock.id,
                     metadata={"portfolio_pct": pct},
                 )
                 alerts_created += 1
@@ -208,7 +196,8 @@ async def run_proactive_alerts_for_user(db: AsyncSession, user_id_str: str):
     for news_alert in news_state.get("news_alerts", []):
         category = news_alert.get("category", "monitor")
         score = 10 if category == "critical" else 7
-        holding_id = uuid.UUID(news_alert["holding_id"]) if news_alert.get("holding_id") else None
+        instrument_id = uuid.UUID(news_alert["instrument_id"]) if news_alert.get("instrument_id") else None
+        instrument_type = news_alert.get("instrument_type", "stock")
 
         await _create_alert(
             db, user_id, "adverse_news",
@@ -217,7 +206,7 @@ async def run_proactive_alerts_for_user(db: AsyncSession, user_id_str: str):
             f"{news_alert.get('headline', 'Important news detected')}. {news_alert.get('reason', '')}",
             f"News classified as '{category}'. Signal score: {score}/10.",
             score,
-            holding_id=holding_id,
+            instrument_type=instrument_type, instrument_id=instrument_id,
             metadata={"news_headline": news_alert.get("headline"), "category": category},
         )
         alerts_created += 1

@@ -4,10 +4,11 @@ from datetime import date, datetime
 
 
 class TransactionCreate(BaseModel):
-    holding_id: uuid.UUID
+    instrument_type: str
+    instrument_id: uuid.UUID
     transaction_date: date
     transaction_type: str
-    amount: int
+    amount: float
     units: float | None = None
     price: float | None = None
     notes: str | None = None
@@ -15,10 +16,11 @@ class TransactionCreate(BaseModel):
 
 class TransactionOut(BaseModel):
     id: uuid.UUID
-    holding_id: uuid.UUID
+    instrument_type: str
+    instrument_id: uuid.UUID
     transaction_date: date
     transaction_type: str
-    amount: int
+    amount: float
     units: float | None
     price: float | None
     notes: str | None

@@ -16,8 +16,8 @@ class Holding(Base):
     display_name: Mapped[str] = mapped_column(String(500), nullable=False)
     asset_class: Mapped[str] = mapped_column(String(20), nullable=False)
 
-    invested_amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
-    current_value: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    invested_amount: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False, default=0)
+    current_value: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False, default=0)
     xirr: Mapped[float | None] = mapped_column(Numeric(6, 2))
 
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
@@ -29,12 +29,10 @@ class Holding(Base):
 
     user: Mapped["User"] = relationship("User", back_populates="holdings")
     goal: Mapped["Goal | None"] = relationship("Goal", back_populates="holdings")
-    transactions: Mapped[list["Transaction"]] = relationship("Transaction", back_populates="holding")
-    alerts: Mapped[list["Alert"]] = relationship("Alert", back_populates="related_holding")
 
     @property
-    def unrealised_pnl(self) -> int:
-        return self.current_value - self.invested_amount
+    def unrealised_pnl(self) -> float:
+        return float(self.current_value) - float(self.invested_amount)
 
     __table_args__ = (
         Index("idx_holdings_user_id", "user_id"),

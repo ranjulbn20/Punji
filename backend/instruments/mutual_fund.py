@@ -18,7 +18,7 @@ class MutualFundHandler(InstrumentHandler):
                 return None
             data = resp.json()
             nav = float(data["data"][0]["nav"])
-            return int(nav * float(units) * 100)  # store in paise
+            return round(nav * float(units), 2)
         except Exception:
             return None
 

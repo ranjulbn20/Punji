@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 from database import get_db
 from models import User, PortfolioSnapshot
+from services.instrument_service import get_all_instruments
 from dependencies import get_current_user
 from services.portfolio_service import (
     compute_portfolio_summary, compute_allocation, compute_drift,
@@ -34,22 +35,19 @@ async def portfolio_allocation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    from models import RiskProfile, Holding
+    from models import RiskProfile
     alloc = await compute_allocation(db, user.id)
     drift = await compute_drift(db, user.id)
 
     rp_result = await db.execute(select(RiskProfile).where(RiskProfile.user_id == user.id))
     rp = rp_result.scalar_one_or_none()
 
-    by_type_result = await db.execute(
-        select(Holding).where(Holding.user_id == user.id, Holding.is_active == True)
-    )
-    holdings = by_type_result.scalars().all()
-    total = sum(h.current_value for h in holdings) or 1
+    holdings = await get_all_instruments(db, user.id)
+    total = sum(float(h.current_value) for h in holdings) or 1.0
 
-    by_instrument = {}
+    by_instrument: dict[str, float] = {}
     for h in holdings:
-        by_instrument[h.instrument_type] = by_instrument.get(h.instrument_type, 0) + h.current_value
+        by_instrument[h.instrument_type] = by_instrument.get(h.instrument_type, 0.0) + float(h.current_value)
     by_instrument_list = [
         {"instrument_type": k, "value": v, "pct": round(v / total * 100, 2)}
         for k, v in by_instrument.items()

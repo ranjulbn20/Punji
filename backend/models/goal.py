@@ -13,16 +13,16 @@ class Goal(Base):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     goal_type: Mapped[str | None] = mapped_column(String(50))
-    target_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    target_amount: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)
     target_date: Mapped[Date] = mapped_column(Date, nullable=False)
-    monthly_sip_allocated: Mapped[int] = mapped_column(Integer, default=0)
+    monthly_sip_allocated: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     priority: Mapped[int] = mapped_column(Integer, default=1)
 
     success_probability: Mapped[float | None] = mapped_column(Numeric(5, 2))
-    required_monthly_sip: Mapped[int | None] = mapped_column(Integer)
-    projected_corpus_p10: Mapped[int | None] = mapped_column(BigInteger)
-    projected_corpus_p50: Mapped[int | None] = mapped_column(BigInteger)
-    projected_corpus_p90: Mapped[int | None] = mapped_column(BigInteger)
+    required_monthly_sip: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    projected_corpus_p10: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    projected_corpus_p50: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    projected_corpus_p90: Mapped[float | None] = mapped_column(Numeric(15, 2))
     last_simulation_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -6,7 +6,7 @@ from datetime import date
 class GenericClaudeImporter(CSVImporter):
     """Claude-powered fallback parser for unknown CSV formats."""
 
-    async def parse(self, content: bytes, filename: str) -> list[HoldingDTO]:
+    async def parse(self, content: bytes, filename: str, password: str = "") -> list[HoldingDTO]:
         from anthropic import AsyncAnthropic
         from config import settings
 
@@ -23,8 +23,8 @@ Return a JSON array where each item has:
 - instrument_type: "mutual_fund" | "stock" | "fixed_deposit" | "ppf" | "nps"
 - display_name: string (fund/stock name)
 - asset_class: "equity" | "debt" | "gold" | "cash"
-- invested_amount: integer (INR paise — multiply rupees by 100)
-- current_value: integer (INR paise)
+- invested_amount: number (INR rupees, float)
+- current_value: number (INR rupees, float)
 - metadata: object with relevant fields (units, nav, symbol, quantity, etc.)
 
 Return ONLY a valid JSON array, no explanation."""

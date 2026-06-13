@@ -11,9 +11,11 @@ def detect_format(headers: list[str], file_preview: str) -> str:
 
     if "Consolidated Account Statement" in file_preview or "KFin Technologies" in file_preview:
         return "cams_cas"
-    if {"Symbol", "ISIN", "Qty.", "Avg. cost", "LTP"}.issubset(header_set):
+    if {"Qty.", "Avg. cost", "LTP"}.issubset(header_set) and header_set & {"Symbol", "Instrument"}:
         return "zerodha_holdings"
     if {"Symbol", "ISIN", "Trade Type", "Quantity", "Price", "Trade Date"}.issubset(header_set):
+        return "zerodha_tradebook"
+    if {"symbol", "trade_date", "trade_type", "quantity", "price"}.issubset(header_set):
         return "zerodha_tradebook"
     if {"Stock Name", "Quantity", "Average Price", "Current Price", "Invested Value"}.issubset(header_set):
         return "groww_stocks"

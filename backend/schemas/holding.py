@@ -7,8 +7,8 @@ class HoldingCreate(BaseModel):
     instrument_type: str
     display_name: str
     asset_class: str
-    invested_amount: int
-    current_value: int
+    invested_amount: float
+    current_value: float
     metadata: dict = {}
     goal_id: uuid.UUID | None = None
 
@@ -27,9 +27,9 @@ class HoldingOut(BaseModel):
     instrument_type: str
     display_name: str
     asset_class: str
-    invested_amount: int
-    current_value: int
-    unrealised_pnl: int
+    invested_amount: float
+    current_value: float
+    unrealised_pnl: float
     xirr: float | None
     metadata_: dict
     goal_id: uuid.UUID | None

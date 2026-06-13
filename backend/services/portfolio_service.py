@@ -1,6 +1,6 @@
 """
 Financial mathematics engine. Pure Python, no LLM dependency.
-All monetary values stored in paise (BigInteger). Divide by 100 for rupees.
+All monetary values stored in rupees (Numeric 15,2).
 """
 from datetime import date, datetime, timezone
 from typing import Optional
@@ -9,7 +9,8 @@ from scipy import optimize
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from models import Holding, Transaction, Goal, RiskProfile, PortfolioSnapshot
+from models import Transaction, Goal, RiskProfile, PortfolioSnapshot
+from services.instrument_service import get_all_instruments
 from config import settings
 
 
@@ -43,23 +44,26 @@ def compute_xirr(cashflows: list[tuple[date, float]]) -> Optional[float]:
         return None
 
 
-async def compute_holding_xirr(db: AsyncSession, holding: Holding) -> Optional[float]:
+async def compute_instrument_xirr(db: AsyncSession, instrument) -> Optional[float]:
     result = await db.execute(
         select(Transaction)
-        .where(Transaction.holding_id == holding.id)
+        .where(
+            Transaction.instrument_type == instrument.instrument_type,
+            Transaction.instrument_id == instrument.id,
+        )
         .order_by(Transaction.transaction_date)
     )
     transactions = result.scalars().all()
     if not transactions:
         return None
 
-    cashflows = []
-    for tx in transactions:
-        cashflows.append((tx.transaction_date, float(tx.amount) / 100))
-
-    # Add current value as final negative cashflow (money "received" today)
-    cashflows.append((date.today(), -(float(holding.current_value) / 100)))
+    cashflows = [(tx.transaction_date, float(tx.amount)) for tx in transactions]
+    cashflows.append((date.today(), -float(instrument.current_value)))
     return compute_xirr(cashflows)
+
+
+# Keep old name as alias for call sites not yet updated
+compute_holding_xirr = compute_instrument_xirr
 
 
 async def compute_portfolio_xirr(db: AsyncSession, user_id) -> Optional[float]:
@@ -70,37 +74,31 @@ async def compute_portfolio_xirr(db: AsyncSession, user_id) -> Optional[float]:
     )
     transactions = result.scalars().all()
 
-    holdings_result = await db.execute(
-        select(Holding).where(Holding.user_id == user_id, Holding.is_active == True)
-    )
-    holdings = holdings_result.scalars().all()
-    total_current = sum(h.current_value for h in holdings)
+    instruments = await get_all_instruments(db, user_id)
+    total_current = sum(float(h.current_value) for h in instruments)
 
     if not transactions or total_current == 0:
         return None
 
-    cashflows = [(tx.transaction_date, float(tx.amount) / 100) for tx in transactions]
-    cashflows.append((date.today(), -(total_current / 100)))
+    cashflows = [(tx.transaction_date, float(tx.amount)) for tx in transactions]
+    cashflows.append((date.today(), -total_current))
     return compute_xirr(cashflows)
 
 
 # ─── ALLOCATION ENGINE ────────────────────────────────────────────────────────
 
 async def compute_allocation(db: AsyncSession, user_id) -> dict:
-    result = await db.execute(
-        select(Holding).where(Holding.user_id == user_id, Holding.is_active == True)
-    )
-    holdings = result.scalars().all()
+    holdings = await get_all_instruments(db, user_id)
 
     buckets = {"equity": 0, "debt": 0, "gold": 0, "cash": 0, "real_estate": 0, "alternative": 0}
     total = 0
 
     for h in holdings:
-        buckets[h.asset_class] = buckets.get(h.asset_class, 0) + h.current_value
-        total += h.current_value
+        buckets[h.asset_class] = buckets.get(h.asset_class, 0) + float(h.current_value)
+        total += float(h.current_value)
 
     if total == 0:
-        return {k: 0.0 for k in buckets} | {"total_value": 0}
+        return {k: 0.0 for k in buckets} | {"total_value": 0.0}
 
     pcts = {k: round(v / total * 100, 2) for k, v in buckets.items()}
     return pcts | {"total_value": total, "by_class": buckets}
@@ -214,13 +212,10 @@ async def compute_risk_metrics(db: AsyncSession, user_id) -> dict:
 # ─── PORTFOLIO SUMMARY ────────────────────────────────────────────────────────
 
 async def compute_portfolio_summary(db: AsyncSession, user_id) -> dict:
-    holdings_result = await db.execute(
-        select(Holding).where(Holding.user_id == user_id, Holding.is_active == True)
-    )
-    holdings = holdings_result.scalars().all()
+    holdings = await get_all_instruments(db, user_id)
 
-    total_value = sum(h.current_value for h in holdings)
-    total_invested = sum(h.invested_amount for h in holdings)
+    total_value = sum(float(h.current_value) for h in holdings)
+    total_invested = sum(float(h.invested_amount) for h in holdings)
     total_pnl = total_value - total_invested
     total_pnl_pct = round(total_pnl / total_invested * 100, 2) if total_invested else 0
 
@@ -247,20 +242,11 @@ async def compute_portfolio_summary(db: AsyncSession, user_id) -> dict:
 
 async def run_monte_carlo_for_goal(db: AsyncSession, goal: Goal, user_id) -> None:
     """Run 1,000-simulation Monte Carlo and update goal simulation fields."""
-    holdings_result = await db.execute(
-        select(Holding).where(
-            Holding.user_id == user_id,
-            Holding.goal_id == goal.id,
-            Holding.is_active == True,
-        )
-    )
-    goal_holdings = holdings_result.scalars().all()
+    all_instruments = await get_all_instruments(db, user_id)
+    goal_holdings = [h for h in all_instruments if h.goal_id == goal.id]
 
     if not goal_holdings:
-        all_holdings = await db.execute(
-            select(Holding).where(Holding.user_id == user_id, Holding.is_active == True)
-        )
-        goal_holdings = all_holdings.scalars().all()
+        goal_holdings = all_instruments
 
     # Determine asset mix of linked holdings
     total_val = sum(h.current_value for h in goal_holdings) or 1
@@ -275,7 +261,7 @@ async def run_monte_carlo_for_goal(db: AsyncSession, goal: Goal, user_id) -> Non
         return
 
     n_simulations = 1000
-    current_corpus = sum(h.current_value for h in goal_holdings) / 100  # to rupees
+    current_corpus = sum(float(h.current_value) for h in goal_holdings)
     monthly_sip = goal.monthly_sip_allocated
 
     equity_mean_monthly = 0.12 / 12
@@ -296,7 +282,7 @@ async def run_monte_carlo_for_goal(db: AsyncSession, goal: Goal, user_id) -> Non
         final_values.append(corpus)
 
     final_values_sorted = sorted(final_values)
-    target = goal.target_amount / 100  # to rupees
+    target = float(goal.target_amount)
 
     success_count = sum(1 for v in final_values if v >= target)
     success_prob = round(success_count / n_simulations * 100, 1)

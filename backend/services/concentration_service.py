@@ -5,17 +5,13 @@ Part B: Cross-instrument hidden exposure detection.
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from models import Holding, FundComposition, BusinessGroupMapping
+from models import FundComposition, BusinessGroupMapping
+from services.instrument_service import get_all_instruments
 from datetime import date
 
 
 async def compute_concentration(db: AsyncSession, user_id) -> dict:
-    holdings_result = await db.execute(
-        select(Holding).where(Holding.user_id == user_id, Holding.is_active == True)
-    )
-    holdings = list((await db.execute(
-        select(Holding).where(Holding.user_id == user_id, Holding.is_active == True)
-    )).scalars().all())
+    holdings = await get_all_instruments(db, user_id)
 
     total = sum(h.current_value for h in holdings)
     if total == 0:

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from agents.state import PunjiState
-from models import Holding
+from services.instrument_service import get_instruments_by_type
 from services.market_service import get_stock_news
 from llm import NEWS_INTELLIGENCE
 
@@ -15,18 +15,11 @@ async def news_intelligence_node(state: PunjiState, db: AsyncSession | None = No
 
     user_id = uuid.UUID(state["user_id"])
 
-    result = await db.execute(
-        select(Holding).where(
-            Holding.user_id == user_id,
-            Holding.is_active == True,
-            Holding.instrument_type.in_(["stock", "mutual_fund"]),
-        )
-    )
-    holdings = result.scalars().all()
+    stocks = await get_instruments_by_type(db, user_id, "stock")
 
     alerts = []
-    for holding in holdings[:10]:  # limit to avoid rate limits
-        symbol = holding.metadata_.get("symbol")
+    for holding in stocks[:10]:  # limit to avoid rate limits
+        symbol = holding.symbol
         if not symbol:
             continue
 
@@ -54,7 +47,8 @@ Return ONLY a JSON object: {{"category": "...", "headline": "most important head
 
             if classification["category"] in ("critical", "significant"):
                 alerts.append({
-                    "holding_id": str(holding.id),
+                    "instrument_type": "stock",
+                    "instrument_id": str(holding.id),
                     "holding_name": holding.display_name,
                     "symbol": symbol,
                     "category": classification["category"],

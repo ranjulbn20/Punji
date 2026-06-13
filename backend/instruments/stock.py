@@ -17,7 +17,7 @@ class StockHandler(InstrumentHandler):
             price = info.last_price
             if price is None:
                 return None
-            return int(price * float(quantity) * 100)
+            return round(price * float(quantity), 2)
         except Exception:
             return None
 

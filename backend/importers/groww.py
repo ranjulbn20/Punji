@@ -9,7 +9,7 @@ def _f(s: str) -> float:
 
 
 class GrowwStocksImporter(CSVImporter):
-    async def parse(self, content: bytes, filename: str) -> list[HoldingDTO]:
+    async def parse(self, content: bytes, filename: str, password: str = "") -> list[HoldingDTO]:
         reader = csv.DictReader(io.StringIO(content.decode("utf-8", errors="replace")))
         holdings = []
         for row in reader:
@@ -19,8 +19,8 @@ class GrowwStocksImporter(CSVImporter):
             qty = _f(row.get("Quantity", "0"))
             avg_price = _f(row.get("Average Price", "0"))
             cur_price = _f(row.get("Current Price", "0"))
-            invested = int(_f(row.get("Invested Value", "0")) * 100)
-            current = int(qty * cur_price * 100)
+            invested = round(_f(row.get("Invested Value", "0")), 2)
+            current = round(qty * cur_price, 2)
             holdings.append(HoldingDTO(
                 instrument_type="stock",
                 display_name=name,
@@ -48,7 +48,7 @@ class GrowwStocksImporter(CSVImporter):
 
 
 class GrowwMFImporter(CSVImporter):
-    async def parse(self, content: bytes, filename: str) -> list[HoldingDTO]:
+    async def parse(self, content: bytes, filename: str, password: str = "") -> list[HoldingDTO]:
         reader = csv.DictReader(io.StringIO(content.decode("utf-8", errors="replace")))
         holdings = []
         for row in reader:
@@ -58,8 +58,8 @@ class GrowwMFImporter(CSVImporter):
             units = _f(row.get("Units", "0"))
             avg_nav = _f(row.get("Average NAV", "0"))
             cur_nav = _f(row.get("Current NAV", "0"))
-            invested = int(_f(row.get("Invested Amount", "0")) * 100)
-            current = int(units * cur_nav * 100)
+            invested = round(_f(row.get("Invested Amount", "0")), 2)
+            current = round(units * cur_nav, 2)
             holdings.append(HoldingDTO(
                 instrument_type="mutual_fund",
                 display_name=name,

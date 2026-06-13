@@ -18,6 +18,6 @@ class FixedDepositHandler(InstrumentHandler):
             days_elapsed = (date.today() - start).days
             years = days_elapsed / 365
             value = principal * ((1 + rate / n) ** (n * years))
-            return int(value * 100)
+            return round(value, 2)
         except Exception:
             return None

@@ -24,7 +24,8 @@ class AlertOut(BaseModel):
     is_read: bool
     is_acted_upon: bool
     user_feedback: str | None
-    related_holding_id: uuid.UUID | None
+    related_instrument_id: uuid.UUID | None
+    related_instrument_type: str | None
     related_goal_id: uuid.UUID | None
     created_at: datetime
 

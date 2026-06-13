@@ -67,7 +67,7 @@ scheduler/   → APScheduler cron jobs
 connectors/  → Broker API connectors (stubs only — not implemented)
 ```
 
-**Database:** Async SQLAlchemy 2.0 with asyncpg. `get_db()` in `database.py` is the FastAPI dependency. All monetary amounts are stored as **paise (BigInteger)** — divide by 100 for rupees. The `holdings.metadata` column is JSONB and holds instrument-specific fields (scheme code for MF, exchange for stocks, maturity date for FD, etc.).
+**Database:** Async SQLAlchemy 2.0 with asyncpg. `get_db()` in `database.py` is the FastAPI dependency. All monetary amounts are stored as **rupees (`Numeric(15,2)`)** — no conversion needed at display time. The `holdings.metadata` column is JSONB and holds instrument-specific fields (scheme code for MF, exchange for stocks, maturity date for FD, etc.).
 
 **Auth:** JWT (HS256) via `python-jose`. `dependencies.py::get_current_user()` is the FastAPI dependency used on all protected routes. Tokens are issued at login/register and refreshed via `/api/auth/refresh`.
 
@@ -138,7 +138,7 @@ connectors/  → Broker API connectors (stubs only — not implemented)
 
 ## Key conventions
 
-- **Monetary values:** Always paise in the DB and API. Divide by 100 only at display time. The `fmt()` helper in each page component handles lakh/crore formatting.
+- **Monetary values:** Stored as **rupees** (`Numeric(15,2)`) in the DB and returned as rupees from the API. The `fmt()` helper in each page component handles lakh/crore formatting directly on the rupee value — no division needed.
 - **Soft delete:** Holdings are deactivated (`is_active = false`), never hard-deleted.
 - **Instrument metadata:** Never add new columns to `holdings` for instrument-specific fields — put them in `metadata_` (JSONB). The Python attribute is `metadata_` but maps to the `"metadata"` column via `mapped_column("metadata", ...)`.
 - **UUID primary keys:** All models use `UUID(as_uuid=True)` with Python `uuid.uuid4` defaults.

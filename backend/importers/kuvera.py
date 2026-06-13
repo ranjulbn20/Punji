@@ -9,7 +9,7 @@ def _f(s: str) -> float:
 
 
 class KuveraImporter(CSVImporter):
-    async def parse(self, content: bytes, filename: str) -> list[HoldingDTO]:
+    async def parse(self, content: bytes, filename: str, password: str = "") -> list[HoldingDTO]:
         reader = csv.DictReader(io.StringIO(content.decode("utf-8", errors="replace")))
         holdings = []
         for row in reader:
@@ -20,8 +20,8 @@ class KuveraImporter(CSVImporter):
             avg_nav = _f(row.get("Average NAV", "0"))
             cur_nav = _f(row.get("Current NAV", "0"))
             folio = row.get("Folio", "").strip()
-            invested = int(units * avg_nav * 100)
-            current = int(units * cur_nav * 100)
+            invested = round(units * avg_nav, 2)
+            current = round(units * cur_nav, 2)
             holdings.append(HoldingDTO(
                 instrument_type="mutual_fund",
                 display_name=name,

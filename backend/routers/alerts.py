@@ -40,7 +40,8 @@ async def list_alerts(
             "signal_score": a.signal_score,
             "is_read": a.is_read,
             "user_feedback": a.user_feedback,
-            "related_holding_id": str(a.related_holding_id) if a.related_holding_id else None,
+            "related_instrument_id": str(a.related_instrument_id) if a.related_instrument_id else None,
+            "related_instrument_type": a.related_instrument_type,
             "created_at": a.created_at,
         }
         for a in alerts
