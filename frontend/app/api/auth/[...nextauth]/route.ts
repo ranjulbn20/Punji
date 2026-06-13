@@ -9,8 +9,8 @@ const { handlers } = NextAuth({
     }),
   ],
   callbacks: {
-    async signIn({ user, account }) {
-      if (account?.provider === "google") {
+    async jwt({ token, account }) {
+      if (account?.provider === "google" && account.id_token) {
         try {
           const res = await fetch(
             `${process.env.NEXT_PUBLIC_API_URL}/api/auth/google`,
@@ -20,24 +20,16 @@ const { handlers } = NextAuth({
               body: JSON.stringify({ google_id_token: account.id_token }),
             }
           );
-          if (!res.ok) return false;
-          const data = await res.json();
-          (user as any).backendAccessToken = data.access_token;
-          (user as any).backendRefreshToken = data.refresh_token;
-          (user as any).isNewUser = data.is_new_user;
-          (user as any).backendUser = data.user;
+          if (res.ok) {
+            const data = await res.json();
+            token.backendAccessToken = data.access_token;
+            token.backendRefreshToken = data.refresh_token;
+            token.isNewUser = data.is_new_user;
+            token.backendUser = data.user;
+          }
         } catch {
-          return false;
+          // token stays empty; AuthGuard will redirect to /login
         }
-      }
-      return true;
-    },
-    async jwt({ token, user }) {
-      if (user) {
-        token.backendAccessToken = (user as any).backendAccessToken;
-        token.backendRefreshToken = (user as any).backendRefreshToken;
-        token.isNewUser = (user as any).isNewUser;
-        token.backendUser = (user as any).backendUser;
       }
       return token;
     },

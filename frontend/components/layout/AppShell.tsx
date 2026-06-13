@@ -7,6 +7,7 @@ import {
   FlaskConical, Settings, LogOut, ChevronLeft, ChevronRight, Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { signOut } from "next-auth/react";
 import { usePunji } from "@/store";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
@@ -30,7 +31,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   function logout() {
     clearAuth();
-    router.replace("/login");
+    signOut({ redirectTo: "/login" });
   }
 
   // Close mobile sidebar on route change
