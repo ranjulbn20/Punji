@@ -7,6 +7,7 @@ interface PunjiStore {
   user: User | null;
   accessToken: string | null;
   setAuth: (user: User, accessToken: string, refreshToken: string) => void;
+  setUser: (user: User) => void;
   clearAuth: () => void;
 
   // Portfolio
@@ -33,6 +34,7 @@ export const usePunji = create<PunjiStore>()(
         localStorage.setItem("punji_refresh_token", refreshToken);
         set({ user, accessToken });
       },
+      setUser: (user) => set({ user }),
       clearAuth: () => {
         localStorage.removeItem("punji_access_token");
         localStorage.removeItem("punji_refresh_token");

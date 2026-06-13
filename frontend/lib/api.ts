@@ -1,3 +1,5 @@
+import { usePunji } from "@/store";
+
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 function getToken(): string | null {
@@ -27,7 +29,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
 
   if (res.status === 401) {
-    clearTokens();
+    usePunji.getState().clearAuth();
     window.location.href = "/login";
     throw new Error("Unauthorized");
   }
@@ -124,10 +126,11 @@ export const api = {
   },
 
   imports: {
-    upload: (file: File, platform: string) => {
+    upload: (file: File, platform: string, password?: string) => {
       const form = new FormData();
       form.append("file", file);
       form.append("source_platform", platform);
+      if (password) form.append("password", password);
       const token = getToken();
       return fetch(`${BASE}/api/imports/upload`, {
         method: "POST",

@@ -258,7 +258,7 @@ export default function DashboardPage() {
                           />
                           <span className="capitalize text-muted-foreground">{d.name}</span>
                         </div>
-                        <span className="font-medium">{d.value.toFixed(1)}%</span>
+                        <span className="font-medium">{Number(d.value).toFixed(1)}%</span>
                       </div>
                     ))}
                   </div>

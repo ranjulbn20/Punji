@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { RefreshCw, Plus, Upload, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { api, type Holding } from "@/lib/api";
@@ -32,7 +32,7 @@ type ImportStep = "idle" | "uploading" | "preview" | "confirming" | "done";
 interface PreviewData {
   job_id: string;
   holdings: Holding[];
-  transactions: unknown[];
+  transactions: number;
   duplicates: unknown[];
 }
 
@@ -47,6 +47,9 @@ export default function HoldingsPage() {
   );
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pdfPassword, setPdfPassword] = useState("");
+  const [passwordError, setPasswordError] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function loadHoldings(instrumentType?: string) {
@@ -75,12 +78,31 @@ export default function HoldingsPage() {
     catch {}
   }
 
-  async function handleFileUpload(file: File) {
+  function handleFileSelect(file: File) {
+    setPdfPassword("");
+    setPasswordError(false);
+    if (file.name.toLowerCase().endsWith(".pdf")) {
+      setPendingFile(file);
+      setImportStep("uploading"); // stay on upload step to show password field
+    } else {
+      setPendingFile(null);
+      doUpload(file, "");
+    }
+  }
+
+  async function doUpload(file: File, password: string) {
     setImportStep("uploading");
     try {
-      const job = await api.imports.upload(file, "auto");
-      const prev = await api.imports.preview(job.job_id) as Omit<PreviewData, "job_id">;
-      setPreview({ ...(prev as object), job_id: job.job_id } as PreviewData);
+      const job = await api.imports.upload(file, "auto", password || undefined);
+      if (job.status === "failed") {
+        // Likely wrong password — ask again
+        setPasswordError(true);
+        setPendingFile(file);
+        return;
+      }
+      const jobId = job.import_job_id ?? job.job_id;
+      const prev = await api.imports.preview(jobId) as Omit<PreviewData, "job_id">;
+      setPreview({ ...(prev as object), job_id: jobId } as PreviewData);
       setImportStep("preview");
     } catch { setImportStep("idle"); }
   }
@@ -118,14 +140,14 @@ export default function HoldingsPage() {
         <Card className="mb-6 border-primary/40">
           <CardHeader><CardTitle>Import Holdings</CardTitle></CardHeader>
           <CardContent>
-            {importStep === "uploading" && (
+            {importStep === "uploading" && !pendingFile && (
               <div
                 className="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-border py-10 text-center"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
                   const file = e.dataTransfer.files[0];
-                  if (file) handleFileUpload(file);
+                  if (file) handleFileSelect(file);
                 }}
               >
                 <Upload className="h-10 w-10 text-muted-foreground" />
@@ -139,9 +161,34 @@ export default function HoldingsPage() {
                   type="file"
                   accept=".csv,.pdf,.xlsx"
                   className="hidden"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); }}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
                 />
                 <Button variant="ghost" size="sm" onClick={() => setImportStep("idle")}>Cancel</Button>
+              </div>
+            )}
+
+            {importStep === "uploading" && pendingFile && (
+              <div className="flex flex-col gap-4 max-w-sm">
+                <p className="text-sm font-medium">{pendingFile.name}</p>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">
+                    Document password <span className="text-muted-foreground/60">(usually your PAN number)</span>
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="e.g. ABCDE1234F"
+                    value={pdfPassword}
+                    onChange={(e) => { setPdfPassword(e.target.value); setPasswordError(false); }}
+                    className={`w-full rounded-md border px-3 py-2 text-sm bg-background outline-none focus:ring-1 focus:ring-primary ${passwordError ? "border-red-500" : "border-border"}`}
+                    autoFocus
+                    onKeyDown={(e) => { if (e.key === "Enter") doUpload(pendingFile, pdfPassword); }}
+                  />
+                  {passwordError && <p className="text-xs text-red-400">Incorrect password — please try again.</p>}
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={() => doUpload(pendingFile, pdfPassword)}>Upload</Button>
+                  <Button variant="outline" onClick={() => { setPendingFile(null); setPdfPassword(""); setPasswordError(false); }}>Back</Button>
+                </div>
               </div>
             )}
 
@@ -149,8 +196,8 @@ export default function HoldingsPage() {
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
                   Found <strong>{preview.holdings?.length ?? 0}</strong> holdings and{" "}
-                  <strong>{preview.transactions?.length ?? 0}</strong> transactions.
-                  {preview.duplicates?.length > 0 && (
+                  <strong>{preview.transactions ?? 0}</strong> transactions.
+                  {(preview.duplicates?.length ?? 0) > 0 && (
                     <span className="ml-1 text-yellow-400">{preview.duplicates.length} duplicates will be skipped.</span>
                   )}
                 </p>
@@ -246,9 +293,8 @@ export default function HoldingsPage() {
                 const gain = h.unrealised_pnl >= 0;
                 const pnlPct = h.invested_amount > 0 ? (h.unrealised_pnl / h.invested_amount) * 100 : 0;
                 return (
-                  <>
+                  <React.Fragment key={h.id}>
                     <tr
-                      key={h.id}
                       className="border-b border-border/50 bg-card transition-colors hover:bg-muted/30 cursor-pointer"
                       onClick={() => setExpandedId(expandedId === h.id ? null : h.id)}
                     >
@@ -317,7 +363,7 @@ export default function HoldingsPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>

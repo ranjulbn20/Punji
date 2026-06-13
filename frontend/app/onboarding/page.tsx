@@ -28,16 +28,23 @@ const RISK_OPTIONS = [
   },
 ];
 
+function stepFromOnboardingStep(onboardingStep: number): number {
+  if (onboardingStep >= 2) return 2;
+  return 1;
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
-  const { user, setAuth, accessToken } = usePunji();
-  const [step, setStep] = useState(1);
+  const { user, setUser } = usePunji();
+  const [step, setStep] = useState(() => stepFromOnboardingStep(user?.onboarding_step ?? 0));
   const [loading, setLoading] = useState(false);
 
   async function selectRisk(value: string) {
     setLoading(true);
     try {
       await api.auth.setRiskProfile(value);
+      // Update Zustand so AuthGuard sees the new step on next navigation
+      if (user) setUser({ ...user, onboarding_step: 2 });
       setStep(2);
     } finally {
       setLoading(false);
