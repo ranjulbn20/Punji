@@ -122,8 +122,9 @@ def build_instrument_from_dto(user_id, dto: dict):
             scheme_name=dto["display_name"],
             folio_number=meta.get("folio_number", ""),
             isin=meta.get("isin", ""),
+            scheme_code=meta.get("scheme_code"),
             units=meta.get("units", 0),
-            avg_nav=meta.get("avg_nav", 0),
+            avg_nav=meta.get("average_nav") or meta.get("avg_nav", 0),
             current_nav=meta.get("current_nav", 0),
             asset_class_stored=dto.get("asset_class", "equity"),
         )

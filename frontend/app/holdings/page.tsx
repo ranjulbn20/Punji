@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { RefreshCw, Plus, Upload, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { RefreshCw, Plus, Upload, Trash2, ChevronDown, ChevronUp, ArrowLeft } from "lucide-react";
 import { api, type Holding } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +27,75 @@ function fmt(n: number) {
   return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
-type ImportStep = "idle" | "uploading" | "preview" | "confirming" | "done";
+// ── Platform configuration ────────────────────────────────────────────────────
+
+interface PlatformConfig {
+  id: string;
+  name: string;
+  tag: string;
+  hint: string;
+  acceptsPdf: boolean;
+}
+
+const MF_PLATFORMS: PlatformConfig[] = [
+  {
+    id: "cams_cas",
+    name: "CAMS / KFintech CAS",
+    tag: "All AMCs",
+    hint: "Password-protected PDF from mycams.com or kfintech.com — password is your PAN (e.g. ABCDE1234F)",
+    acceptsPdf: true,
+  },
+  {
+    id: "groww_mf",
+    name: "Groww",
+    tag: "Groww MF",
+    hint: "Holdings CSV: groww.in → Portfolio → Mutual Funds → Download",
+    acceptsPdf: false,
+  },
+  {
+    id: "kuvera",
+    name: "Kuvera",
+    tag: "Kuvera MF",
+    hint: "Holdings CSV: kuvera.in → Portfolio → Current Holdings → Export CSV",
+    acceptsPdf: false,
+  },
+];
+
+const STOCK_PLATFORMS: PlatformConfig[] = [
+  {
+    id: "zerodha_holdings",
+    name: "Zerodha Holdings",
+    tag: "Snapshot",
+    hint: "Holdings CSV: console.zerodha.com → Portfolio → Holdings → ↓ Download",
+    acceptsPdf: false,
+  },
+  {
+    id: "zerodha_tradebook",
+    name: "Zerodha Tradebook",
+    tag: "Full history",
+    hint: "For accurate XIRR: console.zerodha.com → Reports → Tradebook → Download",
+    acceptsPdf: false,
+  },
+  {
+    id: "groww_stocks",
+    name: "Groww",
+    tag: "Groww Stocks",
+    hint: "Holdings CSV: groww.in → Portfolio → Stocks → Download",
+    acceptsPdf: false,
+  },
+];
+
+// ── Step type ─────────────────────────────────────────────────────────────────
+
+type ImportStep =
+  | "idle"
+  | "select_type"
+  | "select_platform"
+  | "uploading"
+  | "password"
+  | "preview"
+  | "confirming"
+  | "done";
 
 interface PreviewData {
   job_id: string;
@@ -36,6 +104,8 @@ interface PreviewData {
   duplicates: unknown[];
 }
 
+// ── Page component ────────────────────────────────────────────────────────────
+
 export default function HoldingsPage() {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<Tab>("All");
@@ -43,8 +113,10 @@ export default function HoldingsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [importStep, setImportStep] = useState<ImportStep>(
-    searchParams.get("import") === "true" ? "uploading" : "idle"
+    searchParams.get("import") === "true" ? "select_type" : "idle"
   );
+  const [selectedType, setSelectedType] = useState<"mf" | "stocks" | null>(null);
+  const [selectedPlatform, setSelectedPlatform] = useState<PlatformConfig | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -78,12 +150,22 @@ export default function HoldingsPage() {
     catch {}
   }
 
+  function resetImport() {
+    setImportStep("idle");
+    setSelectedType(null);
+    setSelectedPlatform(null);
+    setPendingFile(null);
+    setPdfPassword("");
+    setPasswordError(false);
+    setPreview(null);
+  }
+
   function handleFileSelect(file: File) {
     setPdfPassword("");
     setPasswordError(false);
     if (file.name.toLowerCase().endsWith(".pdf")) {
       setPendingFile(file);
-      setImportStep("uploading"); // stay on upload step to show password field
+      setImportStep("password");
     } else {
       setPendingFile(null);
       doUpload(file, "");
@@ -93,18 +175,19 @@ export default function HoldingsPage() {
   async function doUpload(file: File, password: string) {
     setImportStep("uploading");
     try {
-      const job = await api.imports.upload(file, "auto", password || undefined);
+      const platformId = selectedPlatform?.id ?? "generic";
+      const job = await api.imports.upload(file, platformId, password || undefined);
       if (job.status === "failed") {
-        // Likely wrong password — ask again
         setPasswordError(true);
         setPendingFile(file);
+        setImportStep("password");
         return;
       }
       const jobId = job.import_job_id ?? job.job_id;
       const prev = await api.imports.preview(jobId) as Omit<PreviewData, "job_id">;
       setPreview({ ...(prev as object), job_id: jobId } as PreviewData);
       setImportStep("preview");
-    } catch { setImportStep("idle"); }
+    } catch { resetImport(); }
   }
 
   async function confirmImport() {
@@ -117,14 +200,15 @@ export default function HoldingsPage() {
     } catch { setImportStep("preview"); }
   }
 
-  const filtered = holdings; // already filtered via API
+  const filtered = holdings;
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Holdings</h1>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setImportStep("uploading")}>
+          <Button variant="outline" size="sm" onClick={() => setImportStep("select_type")}>
             <Upload className="h-4 w-4" />
             Import
           </Button>
@@ -135,12 +219,85 @@ export default function HoldingsPage() {
         </div>
       </div>
 
-      {/* Import panel */}
+      {/* ── Import panel ── */}
       {importStep !== "idle" && importStep !== "done" && (
         <Card className="mb-6 border-primary/40">
-          <CardHeader><CardTitle>Import Holdings</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              {importStep !== "select_type" && (
+                <button
+                  onClick={() => {
+                    if (importStep === "select_platform") setImportStep("select_type");
+                    else if (importStep === "uploading") setImportStep("select_platform");
+                    else if (importStep === "password") { setPendingFile(null); setImportStep("uploading"); }
+                    else if (importStep === "preview") setImportStep("uploading");
+                  }}
+                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  aria-label="Back"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </button>
+              )}
+              Import Holdings
+              {selectedType && (
+                <span className="text-sm font-normal text-muted-foreground">
+                  — {selectedType === "mf" ? "Mutual Funds" : "Stocks"}
+                  {selectedPlatform && ` › ${selectedPlatform.name}`}
+                </span>
+              )}
+            </CardTitle>
+          </CardHeader>
           <CardContent>
-            {importStep === "uploading" && !pendingFile && (
+
+            {/* Step 1: Select asset type */}
+            {importStep === "select_type" && (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">What would you like to import?</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { key: "mf" as const, label: "Mutual Funds", desc: "CAMS CAS, Groww, Kuvera" },
+                    { key: "stocks" as const, label: "Stocks", desc: "Zerodha, Groww" },
+                  ].map(({ key, label, desc }) => (
+                    <button
+                      key={key}
+                      onClick={() => { setSelectedType(key); setImportStep("select_platform"); }}
+                      className="rounded-xl border border-border p-4 text-left hover:border-primary/60 hover:bg-primary/5 transition-colors"
+                    >
+                      <p className="font-medium">{label}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{desc}</p>
+                    </button>
+                  ))}
+                </div>
+                <Button variant="ghost" size="sm" onClick={resetImport}>Cancel</Button>
+              </div>
+            )}
+
+            {/* Step 2: Select platform */}
+            {importStep === "select_platform" && selectedType && (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">Which platform is your data from?</p>
+                <div className="grid gap-2">
+                  {(selectedType === "mf" ? MF_PLATFORMS : STOCK_PLATFORMS).map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => { setSelectedPlatform(p); setImportStep("uploading"); }}
+                      className="flex items-start justify-between rounded-xl border border-border px-4 py-3 text-left hover:border-primary/60 hover:bg-primary/5 transition-colors"
+                    >
+                      <div>
+                        <p className="font-medium">{p.name}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{p.hint}</p>
+                      </div>
+                      <Badge variant="outline" className="ml-3 mt-0.5 shrink-0 text-xs">
+                        {p.tag}
+                      </Badge>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: Upload drop zone */}
+            {importStep === "uploading" && selectedPlatform && (
               <div
                 className="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-border py-10 text-center"
                 onDragOver={(e) => e.preventDefault()}
@@ -152,53 +309,66 @@ export default function HoldingsPage() {
               >
                 <Upload className="h-10 w-10 text-muted-foreground" />
                 <div>
-                  <p className="font-medium">Drag & drop a CSV/PDF here</p>
-                  <p className="text-sm text-muted-foreground">Zerodha, Groww, CAMS CAS, or any broker CSV</p>
+                  <p className="font-medium">Drag & drop your {selectedPlatform.name} file here</p>
+                  <p className="mt-1 text-sm text-muted-foreground max-w-sm">{selectedPlatform.hint}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Accepts: {selectedPlatform.acceptsPdf ? "CSV or PDF" : "CSV"}
+                  </p>
                 </div>
                 <Button variant="outline" onClick={() => fileRef.current?.click()}>Browse file</Button>
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".csv,.pdf,.xlsx"
+                  accept={selectedPlatform.acceptsPdf ? ".csv,.pdf" : ".csv"}
                   className="hidden"
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
                 />
-                <Button variant="ghost" size="sm" onClick={() => setImportStep("idle")}>Cancel</Button>
               </div>
             )}
 
-            {importStep === "uploading" && pendingFile && (
+            {/* Step 3b: PDF password */}
+            {importStep === "password" && pendingFile && selectedPlatform && (
               <div className="flex flex-col gap-4 max-w-sm">
                 <p className="text-sm font-medium">{pendingFile.name}</p>
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground">
-                    Document password <span className="text-muted-foreground/60">(usually your PAN number)</span>
+                    Document password{" "}
+                    <span className="text-muted-foreground/60">(usually your PAN number in uppercase)</span>
                   </label>
                   <input
                     type="password"
                     placeholder="e.g. ABCDE1234F"
                     value={pdfPassword}
                     onChange={(e) => { setPdfPassword(e.target.value); setPasswordError(false); }}
-                    className={`w-full rounded-md border px-3 py-2 text-sm bg-background outline-none focus:ring-1 focus:ring-primary ${passwordError ? "border-red-500" : "border-border"}`}
+                    className={`w-full rounded-md border px-3 py-2 text-sm bg-background outline-none focus:ring-1 focus:ring-primary ${
+                      passwordError ? "border-red-500" : "border-border"
+                    }`}
                     autoFocus
                     onKeyDown={(e) => { if (e.key === "Enter") doUpload(pendingFile, pdfPassword); }}
                   />
-                  {passwordError && <p className="text-xs text-red-400">Incorrect password — please try again.</p>}
+                  {passwordError && (
+                    <p className="text-xs text-red-400">Incorrect password — please try again.</p>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={() => doUpload(pendingFile, pdfPassword)}>Upload</Button>
-                  <Button variant="outline" onClick={() => { setPendingFile(null); setPdfPassword(""); setPasswordError(false); }}>Back</Button>
+                  <Button variant="outline" onClick={() => { setPendingFile(null); setPdfPassword(""); setPasswordError(false); setImportStep("uploading"); }}>
+                    Back
+                  </Button>
                 </div>
               </div>
             )}
 
+            {/* Step 4: Preview */}
             {importStep === "preview" && preview && (
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
                   Found <strong>{preview.holdings?.length ?? 0}</strong> holdings and{" "}
                   <strong>{preview.transactions ?? 0}</strong> transactions.
                   {(preview.duplicates?.length ?? 0) > 0 && (
-                    <span className="ml-1 text-yellow-400">{preview.duplicates.length} duplicates will be skipped.</span>
+                    <span className="ml-1 text-yellow-400">
+                      {preview.duplicates.length} duplicates will be skipped.
+                    </span>
                   )}
                 </p>
                 <div className="max-h-48 overflow-y-auto rounded-lg border border-border">
@@ -223,11 +393,12 @@ export default function HoldingsPage() {
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={confirmImport}>Confirm Import</Button>
-                  <Button variant="outline" onClick={() => setImportStep("idle")}>Cancel</Button>
+                  <Button variant="outline" onClick={resetImport}>Cancel</Button>
                 </div>
               </div>
             )}
 
+            {/* Uploading spinner (shown while file is being processed) */}
             {importStep === "confirming" && (
               <div className="flex items-center gap-3 py-4">
                 <RefreshCw className="h-5 w-5 animate-spin text-primary" />
@@ -241,11 +412,11 @@ export default function HoldingsPage() {
       {importStep === "done" && (
         <div className="mb-6 rounded-xl bg-green-500/10 border border-green-500/30 px-4 py-3 text-sm text-green-400">
           Import complete! Your holdings have been updated.
-          <button className="ml-2 underline" onClick={() => setImportStep("idle")}>Dismiss</button>
+          <button className="ml-2 underline" onClick={resetImport}>Dismiss</button>
         </div>
       )}
 
-      {/* Tabs */}
+      {/* ── Tabs ── */}
       <div className="mb-4 flex gap-1 overflow-x-auto">
         {TABS.map((t) => (
           <button
@@ -261,7 +432,7 @@ export default function HoldingsPage() {
         ))}
       </div>
 
-      {/* Holdings table */}
+      {/* ── Holdings table ── */}
       {loading ? (
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}
@@ -269,7 +440,7 @@ export default function HoldingsPage() {
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-4 py-20 text-center">
           <p className="text-muted-foreground">No holdings yet</p>
-          <Button onClick={() => setImportStep("uploading")}>
+          <Button onClick={() => setImportStep("select_type")}>
             <Upload className="h-4 w-4" />
             Import from file
           </Button>

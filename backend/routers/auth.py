@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import httpx
@@ -15,6 +15,7 @@ from services.auth_service import (
     create_access_token, create_refresh_token, decode_token,
     derive_risk_profile,
 )
+from services.market_service import refresh_mf_navs_bg
 from dependencies import get_current_user
 from jose import JWTError
 
@@ -46,12 +47,13 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenPair)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email, User.is_active == True))
     user = result.scalar_one_or_none()
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    background_tasks.add_task(refresh_mf_navs_bg, str(user.id))
     token_data = {"sub": str(user.id)}
     return TokenPair(
         access_token=create_access_token(token_data),
@@ -61,7 +63,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/google")
-async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db)):
+async def google_auth(body: GoogleAuthRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             "https://oauth2.googleapis.com/tokeninfo",
@@ -100,6 +102,8 @@ async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db
     await db.commit()
     await db.refresh(user)
 
+    if not is_new:
+        background_tasks.add_task(refresh_mf_navs_bg, str(user.id))
     token_data = {"sub": str(user.id)}
     return {
         "access_token": create_access_token(token_data),

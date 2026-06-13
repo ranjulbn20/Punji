@@ -16,6 +16,7 @@ class MutualFund(Base):
     scheme_name: Mapped[str] = mapped_column(String(500), nullable=False)
     folio_number: Mapped[str] = mapped_column(String(50), nullable=False, default="")
     isin: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+    scheme_code: Mapped[int | None] = mapped_column(nullable=True)
     units: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False, default=0)
     avg_nav: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
     current_nav: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)

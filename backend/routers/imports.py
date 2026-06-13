@@ -5,13 +5,14 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from database import get_db
-from models import User, ImportJob, Transaction
+from models import User, ImportJob, Transaction, MutualFund
 from dependencies import get_current_user
 from importers import detect_format, get_importer
 from services.instrument_service import find_existing_instrument, build_instrument_from_dto
+from services.market_service import get_nav_by_isin
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
@@ -131,6 +132,43 @@ async def confirm_import(
 
     created = updated = tx_created = 0
 
+    # ── CAMS CAS: full replace ────────────────────────────────────────────────
+    # CAMS CAS is a comprehensive snapshot of all MF holdings, so re-uploading
+    # should replace the previous import, not stack on top of it.
+    goal_map: dict[tuple, uuid.UUID] = {}
+    if job.source_platform == "cams_cas":
+        # Preserve any goal associations keyed by (isin, folio_number)
+        existing_q = select(MutualFund).where(
+            MutualFund.user_id == user.id,
+            MutualFund.is_active == True,
+        )
+        existing_mfs = (await db.execute(existing_q)).scalars().all()
+        goal_map = {
+            (mf.isin, mf.folio_number): mf.goal_id
+            for mf in existing_mfs
+            if mf.goal_id
+        }
+        for mf in existing_mfs:
+            mf.is_active = False
+        await db.flush()
+
+    # ── Enrich MF DTOs with live NAV from AMFI ───────────────────────────────
+    # Sequential: first call downloads + caches the AMFI map, rest hit Redis.
+    for dto in dtos:
+        if dto["instrument_type"] != "mutual_fund":
+            continue
+        isin = dto.get("metadata", {}).get("isin", "")
+        if not isin:
+            continue
+        nav = await get_nav_by_isin(isin)
+        if nav:
+            meta = dto.setdefault("metadata", {})
+            meta["scheme_code"] = nav["scheme_code"]
+            meta["current_nav"] = nav["current_nav"]
+            units = meta.get("units", 0)
+            if units:
+                dto["current_value"] = round(float(units) * nav["current_nav"], 2)
+
     for i, dto in enumerate(dtos):
         if i in skipped_indices:
             continue
@@ -151,6 +189,13 @@ async def confirm_import(
             db.add(instrument)
             await db.flush()
             created += 1
+
+        # Restore goal association preserved from previous CAMS CAS import
+        if goal_map and dto["instrument_type"] == "mutual_fund":
+            meta = dto.get("metadata", {})
+            key = (meta.get("isin", ""), meta.get("folio_number", ""))
+            if key in goal_map:
+                instrument.goal_id = goal_map[key]
 
         instrument_type = dto["instrument_type"]
 

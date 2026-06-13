@@ -68,28 +68,36 @@ class CAMSCASImporter(CSVImporter):
           Nominee 1: ...
           Opening Unit Balance: X.XXX
           DD-Mon-YYYY  Description  Amount  Units  NAV  UnitBalance
-          DD-Mon-YYYY  *** Stamp Duty ***  amount
           ...
-          Closing Unit Balance: X.XXX NAV on DD-Mon-YYYY: INR X.XX
-                 Total Cost Value: X.XX  Market Value on DD-Mon-YYYY: INR X.XX
+          [Line A] Closing Unit Balance: X.XXX  NAV on DD-Mon-YYYY: INR X.XX  Market Value on DD-Mon-YYYY: INR X.XX
+          [exit load text]
+          [Line B] Closing Unit Balance: X.XXX  Total Cost Value: X.XX
         """
         holdings: list[HoldingDTO] = []
         lines = [ln.strip() for ln in text.split("\n")]
 
         # State
         current_scheme: str | None = None
+        current_isin: str | None = None
         current_folio: str | None = None
         transactions: list[TransactionDTO] = []
 
         # Patterns
         folio_re = re.compile(r"Folio\s+No\s*:\s*(\S+)", re.IGNORECASE)
 
-        # Scheme line starts with an alphanumeric code, dash, scheme name, then " - ISIN:"
-        isin_line_re = re.compile(r"^[A-Z0-9]+-(.+?)\s+-\s+ISIN:", re.IGNORECASE)
+        # Scheme line: code-SchemeNameParts - ISIN: CODE
+        # Group 1 = scheme name, Group 2 = ISIN code
+        isin_line_re = re.compile(
+            r"^[A-Z0-9]+-(.+?)\s+-\s+ISIN:\s*([A-Z0-9]+)",
+            re.IGNORECASE,
+        )
 
-        # Closing balance line — all on one line in the PDF
+        # pdfplumber joins the closing summary into one line:
+        # "Closing Unit Balance: X  NAV on DD-Mon-YYYY: INR X  Total Cost Value: X  Market Value on ...: INR X"
+        # Group 1 = closing units, Group 2 = current NAV, Group 3 = total cost, Group 4 = market value
         closing_re = re.compile(
             r"Closing\s+Unit\s+Balance\s*:\s*([\d,\.]+).*?"
+            r"NAV\s+on.*?INR\s*([\d,\.]+).*?"
             r"Total\s+Cost\s+Value\s*:\s*([\d,\.]+).*?"
             r"Market\s+Value.*?INR\s*([\d,\.]+)",
             re.IGNORECASE,
@@ -116,28 +124,38 @@ class CAMSCASImporter(CSVImporter):
             if line.startswith("Date Transaction") or line.startswith("(INR)"):
                 continue
 
-            # ── Folio number (marks start of a new fund block) ──────────────
+            # ── Folio number ──────────────────────────────────────────────────
+            # In CAMS CAS PDFs the ISIN line always precedes the Folio No line,
+            # so we must NOT reset current_scheme here.
             folio_match = folio_re.search(line)
             if folio_match:
                 current_folio = folio_match.group(1).strip().rstrip("/").strip()
-                # Reset scheme — it will be set by the ISIN line that follows
-                current_scheme = None
-                transactions = []
                 continue
 
-            # ── Scheme name (from ISIN line) ─────────────────────────────────
+            # ── ISIN continuation (long scheme names wrap the ISIN to next line) ─
+            # ISINs are always 12 chars; if we have a partial one, try to extend.
+            if current_isin and len(current_isin) < 12:
+                cont = re.match(r"^([A-Z0-9]+)", line, re.IGNORECASE)
+                if cont:
+                    current_isin = (current_isin + cont.group(1).upper())[:12]
+                    continue
+
+            # ── Scheme name + ISIN (from ISIN line) ──────────────────────────
             isin_match = isin_line_re.match(line)
             if isin_match:
                 current_scheme = isin_match.group(1).strip()
+                current_isin = isin_match.group(2).strip().upper()
                 transactions = []
                 continue
 
-            # ── Closing balance — emit the holding ───────────────────────────
+            # ── Closing summary line — emit the holding ──────────────────────
             closing_match = closing_re.search(line)
             if closing_match and current_scheme:
                 units = float(closing_match.group(1).replace(",", ""))
-                cost_value = float(closing_match.group(2).replace(",", ""))
-                market_value = float(closing_match.group(3).replace(",", ""))
+                current_nav = float(closing_match.group(2).replace(",", ""))
+                cost_value = float(closing_match.group(3).replace(",", ""))
+                market_value = float(closing_match.group(4).replace(",", ""))
+                avg_nav = round(cost_value / units, 4) if units else 0.0
 
                 holdings.append(HoldingDTO(
                     instrument_type="mutual_fund",
@@ -146,13 +164,17 @@ class CAMSCASImporter(CSVImporter):
                     invested_amount=round(cost_value, 2),
                     current_value=round(market_value, 2),
                     metadata={
+                        "isin": current_isin or "",
                         "units": units,
+                        "current_nav": current_nav,
+                        "average_nav": avg_nav,
                         "folio_number": current_folio or "",
                     },
                     transactions=transactions[:],
                     confidence_score=0.97,
                 ))
                 current_scheme = None
+                current_isin = None
                 current_folio = None
                 transactions = []
                 continue
