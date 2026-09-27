@@ -29,6 +29,7 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const autoSentRef = useRef(false);
 
   useEffect(() => {
     api.agent.conversations().then((data) => setConversations(data as Conversation[])).catch(() => {});
@@ -38,10 +39,14 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Auto-submit if ?q= param is present
+  // Auto-submit if ?q= param is present. Guarded against Strict Mode's
+  // double-invoked mount effect in dev, which would otherwise send it twice.
   useEffect(() => {
     const q = searchParams.get("q");
-    if (q) send(q);
+    if (q && !autoSentRef.current) {
+      autoSentRef.current = true;
+      send(q);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -10,6 +10,7 @@ from google.genai import types
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from llm.base import BaseLLMProvider, LLMResponse
+from llm.retry import with_retry
 from config import settings
 
 
@@ -31,11 +32,11 @@ class GeminiProvider(BaseLLMProvider):
             temperature=t,
             tools=[types.Tool(google_search=types.GoogleSearch())] if use_search else None,
         )
-        response = await self._client.aio.models.generate_content(
+        response = await with_retry(lambda: self._client.aio.models.generate_content(
             model=self.model_name,
             contents=prompt,
             config=config,
-        )
+        ))
         return LLMResponse(
             content=response.text,
             model=self.model_name,
