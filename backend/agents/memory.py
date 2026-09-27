@@ -3,28 +3,21 @@ Agent memory management — PostgreSQL (structured) + Qdrant (embeddings).
 """
 import uuid
 from datetime import datetime, timezone
-from anthropic import AsyncAnthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from models import AgentMemory
 from config import settings
+from llm import EMBEDDING
+
+MEMORY_COLLECTION = "punji_memories"
 
 
 async def get_embedding(text: str) -> list[float]:
-    """Get embedding from Claude via Anthropic embeddings endpoint."""
+    """Get a semantic embedding via the registry's EMBEDDING provider."""
     try:
-        client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-        # Anthropic doesn't have a native embedding API yet — use a simple hash-based mock
-        # In production, replace with a proper embedding model (e.g., text-embedding-3-small)
-        import hashlib
-        h = hashlib.sha256(text.encode()).digest()
-        vector = [((b - 128) / 128.0) for b in h]
-        # Pad to 1536 dimensions
-        while len(vector) < 1536:
-            vector.extend(vector[:min(len(vector), 1536 - len(vector))])
-        return vector[:1536]
+        return await EMBEDDING.embed(text)
     except Exception:
-        return [0.0] * 1536
+        return [0.0] * EMBEDDING.dimensions
 
 
 async def search_memories(user_id: str, query: str, db: AsyncSession, limit: int = 5) -> list[dict]:
@@ -37,7 +30,7 @@ async def search_memories(user_id: str, query: str, db: AsyncSession, limit: int
         vector = await get_embedding(query)
 
         results = client.search(
-            collection_name="punji_memories",
+            collection_name=MEMORY_COLLECTION,
             query_vector=vector,
             query_filter=Filter(must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]),
             limit=limit,
@@ -83,17 +76,17 @@ async def save_memory(user_id: str, memory_type: str, content: str, db: AsyncSes
 
         # Ensure collection exists
         try:
-            client.get_collection("punji_memories")
+            client.get_collection(MEMORY_COLLECTION)
         except Exception:
             from qdrant_client.http.models import VectorParams, Distance
             client.create_collection(
-                "punji_memories",
-                vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+                MEMORY_COLLECTION,
+                vectors_config=VectorParams(size=EMBEDDING.dimensions, distance=Distance.COSINE),
             )
 
         point_id = str(memory.id)
         client.upsert(
-            collection_name="punji_memories",
+            collection_name=MEMORY_COLLECTION,
             points=[PointStruct(id=point_id, vector=vector, payload={"user_id": user_id, "type": memory_type})],
         )
         memory.qdrant_point_id = point_id
@@ -119,7 +112,7 @@ async def delete_memory(memory_id: str, user_id: str, db: AsyncSession):
         try:
             from qdrant_client import QdrantClient
             client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
-            client.delete(collection_name="punji_memories", points_selector=[mem.qdrant_point_id])
+            client.delete(collection_name=MEMORY_COLLECTION, points_selector=[mem.qdrant_point_id])
         except Exception:
             pass
 

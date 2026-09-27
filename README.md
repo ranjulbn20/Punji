@@ -31,7 +31,7 @@ Punji is an autonomous personal finance agent built for Indian retail investors.
 - **Concentration risk alerts** — Proactive detection of single-stock, sector, and business group concentration
 - **Goal tracking** — Monte Carlo simulation for each financial goal with P10/P50/P90 success probability
 - **Proactive alerts** — Morning digest at 8 AM IST with portfolio-specific insights
-- **Streaming chat** — SSE-based response streaming with reasoning trace accordion
+- **Chat interface** — Ask questions in plain English; the full answer is generated up front, then delivered over SSE with a simulated typing effect and a reasoning trace of which agents ran
 
 ### Goal Planning
 - **Multiple goals** — Retirement, house, education, etc. with separate target amounts and dates
@@ -53,15 +53,16 @@ Punji is an autonomous personal finance agent built for Indian retail investors.
 | Frontend | Next.js 16 (App Router), TypeScript, Tailwind CSS v4, Recharts, Zustand |
 | Backend | FastAPI (async), SQLAlchemy 2.0, Alembic, PostgreSQL 15 |
 | Cache | Redis 7 |
-| AI | Gemini 1.5 Pro/Flash (local), Vertex AI (production), GPT-4o-mini (composition) |
+| Vector store | Qdrant (agent memory embeddings) |
+| AI | Gemini (flash-latest / 1.5-flash via AI Studio), text-embedding-004 (agent memory), GPT-4o-mini (composition) |
 | Auth | NextAuth v5 (Google OAuth + email/password), JWT (HS256) |
-| Infra | Docker Compose (local), Cloud Run + Cloud SQL + Memorystore (GCP) |
+| Infra | Docker Compose (local), Cloud Run (GCP) |
 
 ---
 
 ## Prerequisites
 
-- Docker Desktop, OrbStack, or Colima (for Postgres + Redis)
+- Docker Desktop, OrbStack, or Colima (for Postgres + Redis + Qdrant)
 - Node.js 20+ and npm
 - Python 3.11
 
@@ -91,8 +92,12 @@ Required variables:
 DATABASE_URL=postgresql+asyncpg://punji:punji@localhost:5432/punji
 REDIS_URL=redis://localhost:6379
 
-# LLM — get free key at aistudio.google.com
+# LLM + agent memory embeddings — get free key at aistudio.google.com
 GOOGLE_AI_API_KEY=your_google_ai_key
+
+# Qdrant — local Docker instance started by docker-compose, no auth needed
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
 
 # OpenAI — for MF portfolio composition look-through
 OPENAI_API_KEY=sk-...
@@ -104,8 +109,6 @@ GOOGLE_CLIENT_SECRET=your_oauth_client_secret
 
 # Optional
 ANTHROPIC_API_KEY=          # only if swapping an agent to Claude
-QDRANT_URL=                 # for agent memory (degrades gracefully if absent)
-QDRANT_API_KEY=
 NEWS_API_KEY=               # for news intelligence agent
 RBI_REPO_RATE=6.5           # current RBI repo rate in percent
 
@@ -130,7 +133,7 @@ GOOGLE_CLIENT_SECRET=your_oauth_client_secret
 bash start.sh
 ```
 
-This runs Docker infra (Postgres + Redis), applies DB migrations, starts the FastAPI backend on `:8000`, and the Next.js frontend on `:3000`.
+This runs Docker infra (Postgres + Redis + Qdrant), applies DB migrations, starts the FastAPI backend on `:8000`, and the Next.js frontend on `:3000`.
 
 Or start each piece individually:
 
@@ -200,7 +203,17 @@ Ask natural language questions about your portfolio:
 - *"What is my portfolio XIRR?"*
 - *"Am I on track for my retirement goal?"*
 
-Responses stream in real time. Click the **Reasoning** accordion to see the agent's thinking steps.
+**How a message is handled:**
+
+1. **Intent detection** — `ORCHESTRATOR` (Gemini) classifies the query into one of 9 intents (`portfolio_overview`, `portfolio_advice`, `rebalancing`, `goal_check`, `tax_query`, `stock_question`, `news_query`, `fd_advice`, `general_finance`).
+2. **Agent routing** — the intent maps to an ordered pipeline of agent nodes. For example `portfolio_advice` runs `portfolio_analyser → market_intelligence → recommendation → devil_advocate → synthesise`; `goal_check` runs `goal_tracker → portfolio_analyser → respond`. Each node reads/writes a shared `PunjiState` (allocation, concentration, market context, goal analysis, a draft proposal, and a critique of that proposal).
+3. **Memory** — before the pipeline runs, the query is embedded (Gemini `text-embedding-004`, via the same `EMBEDDING` provider entry in `llm/registry.py` used for all agent memory) and Qdrant is searched for the semantically nearest past exchanges with this user, filtered by `user_id`. If Qdrant is unreachable or unconfigured, this falls back to the most recent memories from Postgres instead of failing the request. After the pipeline finishes, a summary of the exchange is embedded and saved back to both stores — Postgres always, Qdrant best-effort.
+4. **Synthesis** — the final node combines the proposal, the devil's-advocate critique, market context, goal state, and the retrieved memories into one answer via a single LLM call, always appended with a "not financial advice" disclaimer.
+5. **Delivery** — the backend computes the *entire* answer before sending anything back. It then streams it to the frontend over SSE (`token` events) one character at a time to produce a typing effect, followed by a single `reasoning_trace` event (a flat list of one-line log entries, one per agent node that ran) and a `done` event. This is not token-by-token LLM streaming — the model call itself is not incremental.
+
+Click the **Reasoning** accordion to see which agents ran and a short summary of what each contributed.
+
+Qdrant runs locally via `docker-compose` (`punji_qdrant`, port `6333`) alongside Postgres and Redis, and is the durable index behind step 3 — Postgres remains the source of truth for every memory row, so the Qdrant collection can be dropped and rebuilt at any time by replaying saved memories.
 
 ---
 
@@ -274,7 +287,7 @@ Key endpoints:
 gcloud builds submit --config cloudbuild.yaml
 ```
 
-The Cloud Build pipeline builds the backend Docker image, pushes to Artifact Registry, and deploys to Cloud Run (`asia-south1`). The frontend can be deployed to Vercel or any static host. In production, Gemini calls route through Vertex AI using the Cloud Run service account — no API key needed.
+The Cloud Build pipeline builds the backend Docker image, pushes to Artifact Registry, and deploys to Cloud Run (`asia-south1`). The frontend can be deployed to Vercel or any static host. All Gemini calls (chat, agent memory embeddings) go through the same AI Studio API key (`GOOGLE_AI_API_KEY`) in every environment — there is no separate Vertex AI path.
 
 ---
 
@@ -287,7 +300,8 @@ Punji/
 │   ├── importers/       # CSV/PDF parsers (Zerodha, Groww, CAMS, KFIN)
 │   ├── llm/             # Provider-agnostic LLM abstraction layer
 │   │   ├── registry.py  # THE ONLY FILE to edit when swapping models
-│   │   └── providers/   # Gemini, Vertex AI, Anthropic, OpenAI
+│   │   ├── providers/   # Gemini, Anthropic, Groq, OpenAI
+│   │   └── embeddings/  # Embedding provider for agent memory (Gemini text-embedding-004)
 │   ├── migrations/      # Alembic migration versions
 │   ├── models/          # SQLAlchemy ORM models
 │   ├── routers/         # FastAPI route handlers

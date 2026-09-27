@@ -12,8 +12,10 @@ from llm.registry import (
     NEWS_INTELLIGENCE,
     GOAL_TRACKER,
     CONCENTRATION_RISK,
+    EMBEDDING,
 )
 from llm.base import LLMResponse, BaseLLMProvider
+from llm.embeddings.base import BaseEmbeddingProvider
 
 __all__ = [
     "ORCHESTRATOR",
@@ -24,6 +26,8 @@ __all__ = [
     "NEWS_INTELLIGENCE",
     "GOAL_TRACKER",
     "CONCENTRATION_RISK",
+    "EMBEDDING",
     "LLMResponse",
     "BaseLLMProvider",
+    "BaseEmbeddingProvider",
 ]

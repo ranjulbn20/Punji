@@ -72,12 +72,14 @@ connectors/  → Broker API connectors (stubs only — not implemented)
 **Auth:** JWT (HS256) via `python-jose`. `dependencies.py::get_current_user()` is the FastAPI dependency used on all protected routes. Tokens are issued at login/register and refreshed via `/api/auth/refresh`.
 
 **LLM abstraction layer** (`llm/`):
-- `llm/registry.py` is the **only file to edit when swapping models** — assigns a provider instance to each of the 8 agent roles
+- `llm/registry.py` is the **only file to edit when swapping models** — assigns a provider instance to each of the 8 agent roles, plus the shared `EMBEDDING` provider used for agent memory
 - `llm/base.py` — `BaseLLMProvider` ABC with `generate()`, `generate_json()`, `as_langchain_llm()`. Both `generate()` and `generate_json()` take a `use_search: bool = False` param that grounds the response in live Google Search results where the provider supports it.
-- `llm/providers/gemini.py` — Google AI Studio API key (local dev, free). Uses the unified `google-genai` SDK (`google.generativeai` is deprecated — do not reintroduce it).
-- `llm/providers/vertex.py` — Vertex AI (production on Cloud Run, no key needed). Same unified `google-genai` SDK, instantiated with `vertexai=True`.
+- `llm/providers/gemini.py` — Google AI Studio API key, used in every environment (local and production — there is no separate Vertex AI path). Uses the unified `google-genai` SDK (`google.generativeai` is deprecated — do not reintroduce it).
 - `llm/providers/anthropic.py` — Claude (optional swap-in, not default). `use_search` is accepted for interface compatibility but not implemented — ignored rather than raising.
-- When `ENVIRONMENT=production`, registry auto-routes to VertexAI; otherwise uses GeminiProvider
+- `llm/providers/groq_provider.py` — Groq free tier (Llama models), used only as a fallback (see `llm/fallback.py`), never swapped in directly via registry.
+- `llm/fallback.py` — `FallbackLLMProvider` wraps any primary `BaseLLMProvider` and retries against a fallback provider if the primary raises. Composable over any provider pair, not just Gemini/Groq.
+- `llm/retry.py` — retries Gemini calls on transient `429`/`503` google-genai errors with exponential backoff, before `FallbackLLMProvider` would ever kick in.
+- `llm/embeddings/` — `BaseEmbeddingProvider` ABC + `GeminiEmbeddingProvider` (`text-embedding-004`). Used by `agents/memory.py` for agent-memory semantic search (Qdrant). Same swap-one-line pattern as the LLM roles: change the `EMBEDDING` assignment in `registry.py` to swap embedding models.
 - Agents import `from llm import ORCHESTRATOR` etc. — zero direct SDK imports in agent files
 
 **Agent pipeline** (`agents/orchestrator.py`):
@@ -166,20 +168,20 @@ Follow these principles when designing or extending any part of the codebase.
 - **Instrument metadata:** Never add new columns to `holdings` for instrument-specific fields — put them in `metadata_` (JSONB). The Python attribute is `metadata_` but maps to the `"metadata"` column via `mapped_column("metadata", ...)`.
 - **UUID primary keys:** All models use `UUID(as_uuid=True)` with Python `uuid.uuid4` defaults.
 - **Model imports:** Import models from the package `from models import User, Holding, ...` (not individual files) — `models/__init__.py` re-exports all.
-- **LLM calls:** Never import provider SDKs (anthropic, google.generativeai, vertexai) directly in agent files. Always use `from llm import AGENT_ROLE` and call `await AGENT_ROLE.generate(prompt)` or `await AGENT_ROLE.generate_json(prompt)`.
+- **LLM calls:** Never import provider SDKs (anthropic, google.generativeai) directly in agent files. Always use `from llm import AGENT_ROLE` and call `await AGENT_ROLE.generate(prompt)` or `await AGENT_ROLE.generate_json(prompt)`.
 
 ## Environment variables
 
 Backend `backend/.env`:
 - `DATABASE_URL` — must use `postgresql+asyncpg://` scheme
 - `REDIS_URL` — `redis://localhost:6379`
-- `GOOGLE_AI_API_KEY` — from aistudio.google.com (free, used locally by GeminiProvider)
+- `GOOGLE_AI_API_KEY` — from aistudio.google.com (free). Used by GeminiProvider (all agent roles) and GeminiEmbeddingProvider (agent memory), in every environment
 - `ANTHROPIC_API_KEY` — optional, only needed if swapping an agent to Claude in registry.py
+- `GROQ_API_KEY` — optional, free tier at console.groq.com. When set, `_auto()` in `llm/registry.py` wraps every Gemini agent in a `FallbackLLMProvider` that retries against Groq's `llama-3.3-70b-versatile` if the primary call fails (rate limit, overload, outage). Unset by default — no key, no wrapping.
 - `JWT_SECRET` — any random string for local dev
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — for Google OAuth backend token verification
-- `GCP_PROJECT_ID`, `GCP_REGION` — only needed in production (Vertex AI)
 - `ENVIRONMENT` — `"development"` (local) or `"production"` (Cloud Run)
-- `QDRANT_URL`, `QDRANT_API_KEY` — for agent memory; agents degrade gracefully if unreachable
+- `QDRANT_URL`, `QDRANT_API_KEY` — local Docker instance by default (`http://localhost:6333`, no API key); agents degrade gracefully if unreachable
 - `RBI_REPO_RATE` — current RBI repo rate in percent, updated manually
 
 Frontend `frontend/.env.local`:
@@ -193,5 +195,5 @@ Frontend `frontend/.env.local`:
 
 - `backend/Dockerfile` — Cloud Run compatible, runs `alembic upgrade head` then uvicorn on `$PORT`
 - `cloudbuild.yaml` — builds backend image, pushes to Artifact Registry, deploys to Cloud Run `asia-south1`
-- Production uses Vertex AI (same Gemini models, authenticated via Cloud Run service account — no API key needed)
+- Production uses the same `GOOGLE_AI_API_KEY`/AI Studio path as local dev — there is no Vertex AI provider
 - GCP infra (Cloud SQL, Memorystore, Secret Manager) is not needed for local development

@@ -1,6 +1,6 @@
 """
 Abstract base class for all LLM providers.
-Every provider (Gemini, Vertex AI, Claude) must implement this interface.
+Every provider (Gemini, Claude, Groq) must implement this interface.
 Agents never import provider SDKs directly — only this interface.
 """
 

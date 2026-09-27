@@ -1,26 +1,31 @@
 """
 THE ONLY FILE YOU TOUCH TO SWAP MODELS.
 
-Assigns a provider instance to each agent role.
-To swap Orchestrator to Claude: change one line below.
-
-Environment-aware:
-  ENVIRONMENT=production  → VertexAIProvider (GCP service account, no API key on Cloud Run)
-  anything else           → GeminiProvider (AI Studio API key, free for local dev)
+Assigns a provider instance to each agent role, plus the shared embedding
+provider used for agent memory search.
 """
 
 from config import settings
 from llm.base import BaseLLMProvider
+from llm.embeddings.base import BaseEmbeddingProvider
+from llm.embeddings.gemini import GeminiEmbeddingProvider
+from llm.fallback import FallbackLLMProvider
 from llm.providers.gemini import GeminiProvider
-from llm.providers.vertex import VertexAIProvider
 from llm.providers.anthropic import AnthropicProvider
+from llm.providers.groq_provider import GroqProvider
 
 
 def _auto(model: str, temperature: float = 0.3) -> BaseLLMProvider:
-    """Returns VertexAIProvider in production, GeminiProvider otherwise."""
-    if settings.environment == "production":
-        return VertexAIProvider(model=model, temperature=temperature)
-    return GeminiProvider(model=model, temperature=temperature)
+    """
+    Returns GeminiProvider (AI Studio API key), wrapped with a free-tier Groq
+    fallback (llama-3.3-70b-versatile) whenever GROQ_API_KEY is set, so a
+    Gemini outage/rate-limit doesn't take an agent down entirely. Without a
+    key, the Gemini provider is returned as-is.
+    """
+    primary = GeminiProvider(model=model, temperature=temperature)
+    if not settings.groq_api_key:
+        return primary
+    return FallbackLLMProvider(primary, GroqProvider(temperature=temperature))
 
 
 # ============================================================
@@ -38,6 +43,9 @@ PROACTIVE_ALERT:     BaseLLMProvider = _auto("gemini-1.5-flash", temperature=0.1
 NEWS_INTELLIGENCE:   BaseLLMProvider = _auto("gemini-1.5-flash", temperature=0.1)
 GOAL_TRACKER:        BaseLLMProvider = _auto("gemini-1.5-flash", temperature=0.1)
 CONCENTRATION_RISK:  BaseLLMProvider = _auto("gemini-1.5-flash", temperature=0.1)
+
+# Embeddings — used for agent memory semantic search (see agents/memory.py)
+EMBEDDING: BaseEmbeddingProvider = GeminiEmbeddingProvider()
 
 # ============================================================
 # EXAMPLE: Swap Orchestrator to Claude (one-line change):

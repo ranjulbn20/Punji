@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str
     google_ai_api_key: str
     openai_api_key: str = ""
+    groq_api_key: str = ""
     qdrant_url: str
     qdrant_api_key: str
     news_api_key: str
@@ -20,9 +21,6 @@ class Settings(BaseSettings):
     jwt_refresh_token_expire_days: int = 30
     google_client_id: str
     google_client_secret: str
-
-    gcp_project_id: str = "punji-prod"
-    gcp_region: str = "asia-south1"
 
     environment: str = "development"
     frontend_url: str = "http://localhost:3000"
