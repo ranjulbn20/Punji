@@ -3,8 +3,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.state import PunjiState
-from services.instrument_service import get_instruments_by_type
-from services.news_service import classify_holding_news
+from services.news_service import classify_holding_news, select_top_movers
 
 
 async def news_intelligence_node(state: PunjiState, db: AsyncSession | None = None) -> PunjiState:
@@ -13,17 +12,14 @@ async def news_intelligence_node(state: PunjiState, db: AsyncSession | None = No
 
     user_id = uuid.UUID(state["user_id"])
 
-    stocks = await get_instruments_by_type(db, user_id, "stock")
+    top_holdings = await select_top_movers(db, user_id)
 
     alerts = []
-    for holding in stocks[:10]:  # limit to avoid rate limits
-        symbol = holding.symbol
-        if not symbol:
-            continue
-        alerts.extend(await classify_holding_news(holding, symbol))
+    for holding in top_holdings:
+        alerts.extend(await classify_holding_news(holding, holding.symbol))
 
     state["news_alerts"] = alerts
     state["reasoning_trace"] = state.get("reasoning_trace", []) + [
-        f"NewsIntelligence: {len(alerts)} significant news items found across {len(stocks)} holdings"
+        f"NewsIntelligence: {len(alerts)} significant news items found across {len(top_holdings)} top movers"
     ]
     return state

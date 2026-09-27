@@ -122,6 +122,8 @@ export const api = {
     markAllRead: () => apiFetch("/api/alerts/read-all", { method: "PUT" }),
     feedback: (id: string, feedback: string) =>
       apiFetch(`/api/alerts/${id}/feedback`, { method: "POST", body: JSON.stringify({ feedback }) }),
+    refreshSignals: () =>
+      apiFetch<{ alerts_created: number }>("/api/alerts/refresh-signals", { method: "POST" }),
   },
 
   agent: {
@@ -160,6 +162,11 @@ export const api = {
   scenarios: {
     simulate: (data: object) =>
       apiFetch("/api/scenarios/simulate", { method: "POST", body: JSON.stringify(data) }),
+  },
+
+  news: {
+    list: () => apiFetch<NewsHighlight[]>("/api/news"),
+    refresh: () => apiFetch<NewsHighlight[]>("/api/news/refresh", { method: "POST" }),
   },
 };
 
@@ -211,7 +218,30 @@ export interface HoldingTypeSummary { instrument_type: string; count: number; in
 export interface HoldingsSummary { by_type: HoldingTypeSummary[]; total: HoldingTypeSummary; }
 export interface Transaction { id: string; holding_id: string; transaction_date: string; transaction_type: string; amount: number; units?: number; price?: number; }
 export interface Goal { id: string; name: string; target_amount: number; target_date: string; success_probability?: number; monthly_sip_allocated: number; }
-export interface Alert { id: string; alert_type: string; severity: string; title: string; message: string; is_read: boolean; created_at: string; }
+export interface Alert {
+  id: string; alert_type: string; severity: string; title: string; message: string;
+  reasoning?: string | null; is_read: boolean; created_at: string;
+  metadata?: {
+    direction?: string; trend?: string | null;
+    change_1d_pct?: number | null; change_5d_pct?: number | null;
+    market_context?: string; portfolio_weight_pct?: number | null;
+    confidence?: number; news_link?: string | null;
+    benchmark?: {
+      market_change_pct?: number | null; market_relative_pct?: number | null;
+      industry?: string | null; industry_change_pct?: number | null; industry_relative_pct?: number | null;
+    };
+    proposal?: {
+      action: string; instrument: string; amount_inr: number; timeline: string;
+      reasoning: string; expected_outcome: string; tax_note: string;
+    };
+    critique?: {
+      overall: string;
+      dimensions: Record<string, { rating: string; concern: string }>;
+      strongest_concern: string;
+    };
+  };
+}
+export interface NewsHighlight { id: string; instrument_type: string; instrument_id: string; holding_name: string; symbol: string; category: string; headline: string; link: string; reason: string | null; created_at: string; }
 export interface PortfolioSummary { total_value: number; total_invested: number; total_pnl_amount: number; total_pnl_pct: number; portfolio_xirr?: number; allocation: object; drift: object; benchmarks: object; unread_alerts_count: number; }
 
 export interface ExposureSource {

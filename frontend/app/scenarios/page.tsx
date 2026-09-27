@@ -79,7 +79,7 @@ export default function ScenariosPage() {
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[400px_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[400px_minmax(0,1fr)]">
         {/* Config panel */}
         <div className="space-y-4">
           {/* Presets */}

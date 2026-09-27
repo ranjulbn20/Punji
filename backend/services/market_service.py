@@ -48,6 +48,86 @@ async def get_mf_nav(scheme_code: int) -> dict | None:
         await r.aclose()
 
 
+async def _get_company_profile(symbol: str) -> dict:
+    """Shared fetch behind get_company_name/get_stock_industry — one yfinance
+    .info call cached 30 days (company name/industry essentially never change)
+    instead of two separate ones."""
+    r = get_redis()
+    key = f"company_profile:{symbol}"
+    try:
+        cached = await r.get(key)
+        if cached is not None:
+            return json.loads(cached)
+    except Exception:
+        pass
+
+    profile = {"name": symbol.split(".")[0], "industry": None}
+    try:
+        info = yf.Ticker(symbol).info
+        profile["name"] = info.get("longName") or info.get("shortName") or profile["name"]
+        profile["industry"] = info.get("industry")
+    except Exception:
+        pass
+
+    try:
+        await r.setex(key, 30 * 86400, json.dumps(profile))
+    except Exception:
+        pass
+    finally:
+        await r.aclose()
+    return profile
+
+
+async def get_company_name(symbol: str) -> str:
+    """Resolves a ticker to its full legal name (e.g. GILLETTE.NS -> 'Gillette India Limited') —
+    needed because a bare ticker like GILLETTE is too ambiguous to search news with."""
+    profile = await _get_company_profile(symbol)
+    return profile["name"]
+
+
+async def get_stock_industry(symbol: str) -> str | None:
+    """Yahoo's granular `industry` (e.g. 'Banks - Regional'), used for benchmark
+    mapping in services/benchmark_service.py — deliberately not the broad `sector`
+    field, which is too coarse (e.g. 'Financial Services' lumps banks, NBFCs and
+    depositories together)."""
+    profile = await _get_company_profile(symbol)
+    return profile["industry"]
+
+
+async def get_multi_day_change(symbol: str, days: int = 5) -> float | None:
+    """N-trading-day % change (default 5D) — catches a slow bleed that no single
+    day's move would cross a threshold for. Heavier than get_stock_price's
+    fast_info ping, so cached separately with a longer TTL."""
+    r = get_redis()
+    key = f"stock_{days}d:{symbol}"
+    try:
+        cached = await r.get(key)
+        if cached is not None:
+            return json.loads(cached)
+    except Exception:
+        pass
+
+    result = None
+    try:
+        hist = yf.Ticker(symbol).history(period=f"{days + 5}d")
+        closes = hist["Close"].dropna()
+        if len(closes) >= 2:
+            latest = closes.iloc[-1]
+            past = closes.iloc[max(0, len(closes) - 1 - days)]
+            if past:
+                result = round(float((latest - past) / past * 100), 2)
+    except Exception:
+        pass
+
+    try:
+        await r.setex(key, 4 * 3600, json.dumps(result))
+    except Exception:
+        pass
+    finally:
+        await r.aclose()
+    return result
+
+
 async def get_stock_price(symbol: str) -> dict | None:
     r = get_redis()
     key = f"stock:{symbol}"
@@ -395,18 +475,34 @@ async def refresh_stock_prices_bg(user_id: str) -> None:
         print(f"[Stock refresh] Error for user {user_id}: {e}")
 
 
+NEWS_MAX_AGE_DAYS = 7
+
+
 async def get_stock_news(symbol: str) -> list[dict]:
+    """Recent news only — yfinance's feed is sorted newest-first but includes
+    articles months old for thinly-covered stocks, so anything past
+    NEWS_MAX_AGE_DAYS is dropped rather than surfaced as if it just happened."""
     try:
         ticker = yf.Ticker(symbol)
         news = ticker.news or []
-        return [
-            {
-                "title": n.get("content", {}).get("title", ""),
-                "publisher": n.get("content", {}).get("provider", {}).get("displayName", ""),
-                "link": n.get("content", {}).get("canonicalUrl", {}).get("url", ""),
-                "published_at": n.get("content", {}).get("pubDate", ""),
-            }
-            for n in news[:10]
-        ]
+        cutoff = datetime.now(timezone.utc) - timedelta(days=NEWS_MAX_AGE_DAYS)
+
+        items = []
+        for n in news:
+            content = n.get("content", {})
+            pub_date = content.get("pubDate", "")
+            try:
+                published_at = datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if published_at < cutoff:
+                continue
+            items.append({
+                "title": content.get("title", ""),
+                "publisher": content.get("provider", {}).get("displayName", ""),
+                "link": content.get("canonicalUrl", {}).get("url", ""),
+                "published_at": pub_date,
+            })
+        return items[:10]
     except Exception:
         return []

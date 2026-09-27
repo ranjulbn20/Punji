@@ -32,3 +32,4 @@ class User(Base):
     portfolio_snapshots: Mapped[list["PortfolioSnapshot"]] = relationship("PortfolioSnapshot", back_populates="user")
     import_jobs: Mapped[list["ImportJob"]] = relationship("ImportJob", back_populates="user")
     conversations: Mapped[list["Conversation"]] = relationship("Conversation", back_populates="user")
+    news_highlights: Mapped[list["NewsHighlight"]] = relationship("NewsHighlight", back_populates="user")

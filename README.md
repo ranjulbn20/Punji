@@ -1,6 +1,16 @@
 # পুঁজি (Punji) — Personal Finance Agent for Indian Investors
 
-Punji is an autonomous personal finance agent built for Indian retail investors. It consolidates mutual funds, stocks, fixed deposits, PPF, and NPS into a single dashboard, computes XIRR and CAGR, runs Monte Carlo goal projections, and uses an LLM multi-agent pipeline to answer questions, detect concentration risk, and send proactive alerts.
+Punji is an autonomous personal finance agent built for Indian retail investors. It consolidates mutual funds, stocks, fixed deposits, PPF, and NPS into a single dashboard, computes XIRR and CAGR, runs Monte Carlo goal projections, and uses an LLM multi-agent pipeline to answer questions, detect concentration risk, monitor holdings for risk/opportunity signals, and send proactive alerts.
+
+### Engineering highlights
+
+- **Provider-agnostic LLM layer** — every agent role is a `BaseLLMProvider` swapped in from one registry file (Strategy + Registry pattern), with automatic **retry-with-backoff** on transient errors and a **cross-provider fallback** (Gemini → Groq) so a quota/rate-limit hit on one provider doesn't take an agent down. The retry policy is itself quota-aware: a *daily* quota exhaustion (no amount of backoff fixes that within the hour) skips straight to the fallback instead of wasting ~7s retrying a call that can't succeed until tomorrow.
+- **Detection and decision, deliberately separate** — the signal engine always fires an informational alert when something unusual happens; only signals that clear a *meaningfully stricter* bar (company-specific, high severity and confidence, unambiguous direction) get escalated into an actual buy/sell recommendation. A raw "stock fell 5%" never reaches an LLM and becomes "sell" directly — it passes through five independent gates first, and the LLM itself has final veto power (a "hold" verdict suppresses the recommendation alert entirely, regardless of how the quantitative gates scored).
+- **Recommendation, then adversarial critique** — every recommendation is generated scoped to the one flagged holding (never "sell X, consider Y instead" for an unrelated stock), then challenged by a devil's-advocate pass built specifically for single-stock signal trades (is this priced in? temporary or structural? does position size justify acting? is there a less aggressive alternative?) — not the generic portfolio-rebalancing critique reused wholesale from the chat pipeline.
+- **Confidence fusion uses `min()`, not `mean()`** — a deterministic price signal always reports 1.0 confidence (it's certainty the *number* is accurate, not a real probability); averaging that with a genuinely-uncertain LLM-rated news confidence silently inflates weak evidence above the actionability threshold. The weakest signal sets the ceiling, not the strongest.
+- **Benchmark-aware anomaly detection** — distinguishes a company-specific price move from a broad market/sector one, using an industry-mapped NSE index lookup (not just NIFTY 50) built on yfinance's granular `industry` field rather than its too-coarse `sector` field (which lumps banks, NBFCs, and depositories together under "Financial Services"). A move that's "just the market having a red day" is downgraded and annotated instead of alerting at full severity.
+- **Multi-source data pipelines with quality-ranked fallback** — news comes from an unofficial-but-far-better-coverage Google News RSS source first, falling back to yfinance only when it finds nothing; the same fallback pattern used for LLM providers, applied again for a different resource.
+- **Direction vs. trend, kept separate** — a stock down today inside an otherwise-positive 5-day run reports `direction=negative, trend=positive` rather than collapsing that nuance into one field, so alert text can say "today's dip, but the week is still up" instead of guessing wrong in either direction.
 
 ---
 
@@ -33,6 +43,31 @@ Punji is an autonomous personal finance agent built for Indian retail investors.
 - **Proactive alerts** — Morning digest at 8 AM IST with portfolio-specific insights
 - **Chat interface** — Ask questions in plain English; the full answer is generated up front, then delivered over SSE with a simulated typing effect and a reasoning trace of which agents ran
 
+### Proactive Portfolio Monitoring (Signal Engine)
+
+A three-layer pipeline, not a single "price dropped → LLM → sell" shortcut:
+
+**Layer 1 — Detection (`services/signal_service.py`, always fires an informational alert):**
+- **Multi-signal fusion** — a free, deterministic **price signal** (1-day *and* 5-day change, catching both a sharp move and a slow multi-day bleed) combined with an LLM-classified **news signal** (direction, materiality, confidence, event type — both positive *and* negative, not just downside risk)
+- **Benchmark-aware** — every flagged move is compared against NIFTY 50 and an industry-specific NSE index (Banks, Auto, Pharma, FMCG, IT, etc.), so a move that's really "the whole sector moved" gets downgraded and annotated instead of alerting at full severity as if it were company-specific
+- **Portfolio-weighted severity** — the same % move is escalated for a position that's 20% of your portfolio and left alone for one that's 2%
+- **Direction vs. trend** — separately reports today's risk direction and the broader 5-day trend, so a one-day dip inside an otherwise-positive week isn't misreported either way
+- **Cost-bounded by design** — cheap price checks gate the expensive LLM step; only genuinely anomalous holdings (plus the top 5 by portfolio weight, checked every cycle regardless of price movement, since bad news on a large position can break before the price reacts) ever reach the LLM
+
+**Layer 2 — Recommendation (`services/opportunity_service.py`, only for signals clearing a much stricter bar):**
+- A signal is only "opportunity-worthy" if it's **company-specific** (not explained by the sector/market), **high severity**, **confidence ≥ 0.8**, and has a **clean direction** (conflicting price-vs-news signals are explicitly excluded — no forced choice on ambiguous evidence)
+- The recommendation agent proposes a concrete action (buy/sell/trim/hold) scoped to *only* the flagged holding, with a rupee amount, timeline, and tax note
+- A **devil's-advocate pass**, purpose-built for single-stock signal trades, then challenges the proposal's evidence: is this already priced in? temporary or structural? does the position size justify acting? is there a less aggressive alternative (monitor, partial trim, stop-loss)?
+- If the recommendation agent itself concludes "hold," nothing gets surfaced — the LLM has final veto power over the quantitative gates
+
+**Runs automatically** every ~2-3 hours during NSE market hours, plus an on-demand refresh from the dashboard.
+
+### News Intelligence
+- **Per-holding news classification** — recent news for each stock, filtered to a 7-day recency window and classified by impact (critical/significant/monitor/noise) via LLM
+- **Google News RSS-powered** — chosen over financial-data-vendor news APIs after testing showed far better coverage of NSE small/midcaps (thinly covered by yfinance and typical aggregators), with automatic fallback if the primary source finds nothing
+- **Disambiguated queries** — resolves a bare ticker to its full company name before searching (a raw ticker like "GILLETTE" returns razor-brand and concert news; "Gillette India Limited" doesn't)
+- **Dashboard News card** — top-mover-prioritized highlights with direct article links, refreshable on demand
+
 ### Goal Planning
 - **Multiple goals** — Retirement, house, education, etc. with separate target amounts and dates
 - **SIP allocation** — Allocate monthly SIP amounts towards specific goals
@@ -40,7 +75,9 @@ Punji is an autonomous personal finance agent built for Indian retail investors.
 - **Scenarios** — What-if analysis with P10/P50/P90 outcomes
 
 ### Alerts
-- **Severity tiers** — Info / warning / critical with colour-coded badges
+- **Two independent alert cycles** — daily portfolio-level checks (rebalancing drift, FD maturity, goal risk, concentration) at 8 AM IST, plus the signal engine's intraday checks every ~2-3 hours during market hours
+- **Two alert types from the signal engine** — informational `market_event` (always fires — price/news evidence, benchmark comparison, portfolio weight) and, only for the rare high-conviction case, a distinct `signal_opportunity` alert carrying a concrete proposal *and* its devil's-advocate critique side by side
+- **Severity tiers** — Significant / critical, with per-instrument cooldowns so one stock's alert can't suppress another's
 - **Thumbs up/down feedback** — Rate alert quality to improve future alerts
 - **Real-time push** — Alerts delivered via WebSocket connection
 
@@ -54,7 +91,7 @@ Punji is an autonomous personal finance agent built for Indian retail investors.
 | Backend | FastAPI (async), SQLAlchemy 2.0, Alembic, PostgreSQL 15 |
 | Cache | Redis 7 |
 | Vector store | Qdrant (agent memory embeddings) |
-| AI | Gemini (flash-latest / 1.5-flash via AI Studio), text-embedding-004 (agent memory), GPT-4o-mini (composition) |
+| AI | Gemini (`gemini-flash-latest` via AI Studio, `google-genai` SDK) for every agent, with automatic fallback to Groq (`openai/gpt-oss-120b`) on quota/overload; `text-embedding-004` (agent memory); GPT-4o-mini (MF composition) |
 | Auth | NextAuth v5 (Google OAuth + email/password), JWT (HS256) |
 | Infra | Docker Compose (local), Cloud Run (GCP) |
 
@@ -109,7 +146,8 @@ GOOGLE_CLIENT_SECRET=your_oauth_client_secret
 
 # Optional
 ANTHROPIC_API_KEY=          # only if swapping an agent to Claude
-NEWS_API_KEY=               # for news intelligence agent
+GROQ_API_KEY=               # free tier at console.groq.com — enables automatic fallback when Gemini errors
+PRICE_MOVE_THRESHOLD_PCT=5.0 # signal engine's price-move trigger threshold, either direction
 RBI_REPO_RATE=6.5           # current RBI repo rate in percent
 
 ENVIRONMENT=development
@@ -217,6 +255,14 @@ Qdrant runs locally via `docker-compose` (`punji_qdrant`, port `6333`) alongside
 
 ---
 
+### News (`/dashboard`)
+
+The dashboard's News card shows recent, classified news for your stock holdings, prioritized by day-mover ranking. Click refresh to re-fetch — it re-runs the classification for your top 5 movers and replaces the prior highlights. Each headline links directly to the source article.
+
+Recency matters here: articles older than 7 days are filtered out before classification, so a months-old headline never gets surfaced as if it just happened.
+
+---
+
 ### Goals (`/goals`)
 
 Add financial goals with a target amount and target date. Punji runs Monte Carlo simulation weekly and shows your probability of reaching each goal (P10/P50/P90 confidence bands). Allocate monthly SIP amounts to specific goals.
@@ -236,11 +282,38 @@ The simulator shows how P10/P50/P90 outcomes shift for each goal.
 
 ### Alerts (`/alerts`)
 
-Proactive alerts fire every morning at 8 AM IST and include:
-- Concentration risk warnings (single stock > 10%, sector > 30%)
-- Underperforming stocks (trailing sector by > 15% over 3 months)
-- Goal drift warnings
-- Market macro updates
+Two independent alert cycles feed this inbox:
+
+**Daily (8 AM IST)** — portfolio-level checks: rebalancing drift, FD maturity reminders, goal-at-risk warnings (Monte Carlo success probability trending down), and single-stock concentration.
+
+**Intraday (every ~2-3 hours during market hours, plus an on-demand refresh from the dashboard)** — the signal engine's market-event alerts:
+1. **Price signal** — 1-day and 5-day change checked against a configurable threshold (default 5%, either direction). Catches a slow bleed, not just a single sharp move.
+2. **News signal** — for any holding whose price signal fires, *and always* for your top 5 holdings by portfolio weight regardless of price movement (bad news on a large position can break before the price reacts). An LLM classifies direction, materiality, and event type.
+3. **Benchmark check** — the move is compared against NIFTY 50 and, where a clean NSE sector index exists for the holding's industry, that index too. A move mostly explained by the market/sector gets downgraded and the alert says so explicitly, rather than reading as company-specific risk when it isn't.
+4. **Portfolio weight** — a large position's alert is escalated even if the raw % move looks moderate.
+
+Each alert's reasoning (the actual evidence — price moves, benchmark deltas, news headline, portfolio weight) is stored and visible, not just a final verdict — you can see *why* something was flagged, not just that it was.
+
+**When a signal is strong enough, you also get a recommendation, not just a flag.** A real example from testing — Tata Motors PV (TMPV) reported a 79% Q1 profit decline:
+
+```
+Signal:  -1.5% today, -4.4% over 5 days, underperforming both NIFTY 50 (+0.3%)
+         and the Auto index (+0.9%) — a genuine company-specific move, not
+         sector-wide. News confidence 0.95.
+
+Proposal:  SELL — ₹8,714, immediate
+Reasoning: "Q1 profit plunged 79%, causing a 6% share fall and a brokerage
+           downgrade forecasting an 11% downside. Underperformance vs. both
+           NIFTY and the Auto index confirms this is a company-specific
+           earnings shock, not market noise."
+
+Devil's advocate (moderate concern):
+"Selling now may lock in a loss if the stock rebounds after the earnings
+shock. Holding with a stop-loss could achieve similar risk reduction with
+less finality."
+```
+
+Both the proposal and the critique are shown together — Punji doesn't just say "sell," it shows you the case *against* selling too, and leaves the decision to you. This only fires for the rare case that clears a much stricter bar than the informational alert (company-specific, high confidence, unambiguous direction); most flagged moves stay informational only.
 
 Rate each alert with thumbs up/down to improve future alert relevance.
 
@@ -278,6 +351,9 @@ Key endpoints:
 | `POST` | `/api/agent/chat` | Streaming chat (SSE) |
 | `GET` | `/api/goals` | List goals with Monte Carlo results |
 | `GET` | `/api/alerts` | List alerts |
+| `POST` | `/api/alerts/refresh-signals` | Run the price+news+benchmark signal check now |
+| `GET` | `/api/news` | List news highlights for your stock holdings |
+| `POST` | `/api/news/refresh` | Re-fetch and re-classify news for your top movers |
 
 ---
 
@@ -301,17 +377,24 @@ Punji/
 │   ├── llm/             # Provider-agnostic LLM abstraction layer
 │   │   ├── registry.py  # THE ONLY FILE to edit when swapping models
 │   │   ├── providers/   # Gemini, Anthropic, Groq, OpenAI
-│   │   └── embeddings/  # Embedding provider for agent memory (Gemini text-embedding-004)
+│   │   ├── embeddings/  # Embedding provider for agent memory (Gemini text-embedding-004)
+│   │   ├── fallback.py  # Cross-provider fallback (e.g. Gemini -> Groq on error)
+│   │   └── retry.py     # Retry-with-backoff for transient provider errors
 │   ├── migrations/      # Alembic migration versions
 │   ├── models/          # SQLAlchemy ORM models
 │   ├── routers/         # FastAPI route handlers
 │   ├── scheduler/       # APScheduler cron jobs
 │   └── services/        # Business logic
+│       ├── benchmark_service.py     # NIFTY 50 + industry-index comparison
 │       ├── composition_service.py   # MF portfolio composition (LLM-powered)
 │       ├── concentration_service.py # Concentration risk detection
 │       ├── exposure_service.py      # Portfolio look-through computation
 │       ├── market_service.py        # NAV + stock price fetching + caching
-│       └── portfolio_service.py     # XIRR, allocation, Monte Carlo
+│       ├── news_providers/          # Google News RSS (primary) + yfinance (fallback)
+│       ├── news_service.py          # News classification (dashboard + signal engine)
+│       ├── opportunity_service.py   # Phase 3 — recommendation + devil's-advocate critique
+│       ├── portfolio_service.py     # XIRR, allocation, Monte Carlo
+│       └── signal_service.py        # Price+news+benchmark signal fusion
 └── frontend/
     ├── app/             # Next.js App Router pages
     │   ├── exposure/    # Portfolio look-through page

@@ -3,12 +3,12 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  TrendingUp, TrendingDown, Wallet, BarChart3, ArrowRight, MessageSquare,
+  TrendingUp, TrendingDown, Wallet, BarChart3, ArrowRight, MessageSquare, Newspaper, RefreshCw, ExternalLink,
 } from "lucide-react";
 import {
   AreaChart, Area, PieChart, Pie, Cell, Tooltip, ResponsiveContainer, XAxis, YAxis,
 } from "recharts";
-import { api, type PortfolioSummary, type Alert } from "@/lib/api";
+import { api, type PortfolioSummary, type Alert, type NewsHighlight } from "@/lib/api";
 import { usePunji } from "@/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -32,13 +32,20 @@ const DONUT_COLORS: Record<string, string> = {
   gold: "#f59e0b",
   real_estate: "#10b981",
   cash: "#94a3b8",
-  other: "#a78bfa",
+  alternative: "#a78bfa",
 };
+
+const ASSET_CLASSES = Object.keys(DONUT_COLORS);
 
 const SEVERITY_BADGE: Record<string, "destructive" | "warning" | "default"> = {
   critical: "destructive",
   warning: "warning",
   info: "default",
+};
+
+const NEWS_CATEGORY_BADGE: Record<string, "destructive" | "warning" | "default"> = {
+  critical: "destructive",
+  significant: "warning",
 };
 
 function MetricCard({
@@ -64,28 +71,50 @@ export default function DashboardPage() {
   const { portfolioSummary, setPortfolioSummary } = usePunji();
   const [perf, setPerf] = useState<{ date: string; portfolio_value: number }[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [news, setNews] = useState<NewsHighlight[]>([]);
+  const [newsRefreshing, setNewsRefreshing] = useState(false);
+  const [signalsRefreshing, setSignalsRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [quickAsk, setQuickAsk] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const [sum, perfData, alertData] = await Promise.all([
+      const [sum, perfData, alertData, newsData] = await Promise.all([
         api.portfolio.summary(),
         api.portfolio.performance("1y"),
         api.alerts.list({ limit: "5", is_read: "false" }),
+        api.news.list(),
       ]);
       setPortfolioSummary(sum as PortfolioSummary);
       setPerf((perfData as { chart_data: { date: string; portfolio_value: number }[] }).chart_data ?? []);
       setAlerts(alertData as Alert[]);
+      setNews(newsData as NewsHighlight[]);
     } catch {}
     finally { setLoading(false); }
   }, [setPortfolioSummary]);
 
   useEffect(() => { load(); }, [load]);
 
+  async function handleRefreshNews() {
+    setNewsRefreshing(true);
+    try {
+      setNews(await api.news.refresh());
+    } catch {}
+    finally { setNewsRefreshing(false); }
+  }
+
+  async function handleRefreshSignals() {
+    setSignalsRefreshing(true);
+    try {
+      await api.alerts.refreshSignals();
+      setAlerts(await api.alerts.list({ limit: "5", is_read: "false" }));
+    } catch {}
+    finally { setSignalsRefreshing(false); }
+  }
+
   const alloc = portfolioSummary?.allocation as Record<string, number> | undefined;
   const donutData = alloc
-    ? Object.entries(alloc).map(([k, v]) => ({ name: k, value: v }))
+    ? ASSET_CLASSES.map((k) => ({ name: k, value: alloc[k] ?? 0 }))
     : [];
 
   const isGain = (portfolioSummary?.total_pnl_pct ?? 0) >= 0;
@@ -127,7 +156,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         {/* Left column */}
         <div className="space-y-6">
           {/* Performance chart */}
@@ -193,9 +222,19 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle>Recent Alerts</CardTitle>
-              <Link href="/alerts" className="flex items-center gap-1 text-xs text-primary hover:underline">
-                View all <ArrowRight className="h-3 w-3" />
-              </Link>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleRefreshSignals}
+                  disabled={signalsRefreshing}
+                  title="Check your stock holdings for significant price moves and news now"
+                  className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                >
+                  <RefreshCw className={cn("h-3.5 w-3.5", signalsRefreshing && "animate-spin")} />
+                </button>
+                <Link href="/alerts" className="flex items-center gap-1 text-xs text-primary hover:underline">
+                  View all <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
             </CardHeader>
             <CardContent>
               {alerts.length === 0 ? (
@@ -212,6 +251,58 @@ export default function DashboardPage() {
                         <p className="truncate text-xs text-muted-foreground">{a.message}</p>
                       </div>
                     </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* News highlights */}
+          <Card>
+            <CardHeader className="flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-1.5">
+                <Newspaper className="h-4 w-4" />
+                News
+              </CardTitle>
+              <button
+                onClick={handleRefreshNews}
+                disabled={newsRefreshing}
+                title="Refresh news for your stock holdings"
+                className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", newsRefreshing && "animate-spin")} />
+              </button>
+            </CardHeader>
+            <CardContent>
+              {news.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No news highlights yet — click refresh to fetch the latest for your stock holdings.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {news.map((n) => (
+                    <a
+                      key={n.id}
+                      href={n.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block rounded-lg -mx-2 px-2 py-1.5 transition-colors hover:bg-muted"
+                    >
+                      <div className="flex items-start gap-2">
+                        <Badge variant={NEWS_CATEGORY_BADGE[n.category] ?? "default"} className="mt-0.5 shrink-0">
+                          {n.category}
+                        </Badge>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {n.holding_name} ({n.symbol})
+                          </p>
+                          <p className="flex items-start gap-1 text-sm font-medium">
+                            <span className="min-w-0 break-words">{n.headline}</span>
+                            <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+                          </p>
+                        </div>
+                      </div>
+                    </a>
                   ))}
                 </div>
               )}

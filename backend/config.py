@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     enable_broker_connect: bool = False
 
     rbi_repo_rate: float = 6.5  # Updated manually when RBI changes rate
+    price_move_threshold_pct: float = 5.0  # signal_service.py — configurable so the pipeline can be tested without waiting for real volatility
 
     @field_validator("cors_origins", mode="before")
     @classmethod

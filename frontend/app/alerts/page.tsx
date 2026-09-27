@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { CheckCheck, ChevronDown, ChevronUp, ThumbsUp, ThumbsDown } from "lucide-react";
+import { CheckCheck, ChevronDown, ChevronUp, ExternalLink, ThumbsUp, ThumbsDown } from "lucide-react";
 import { api, type Alert } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,8 +18,15 @@ const TYPE_LABEL: Record<string, string> = {
   rebalance: "Rebalance",
   goal_drift: "Goal Drift",
   market_event: "Market Event",
+  signal_opportunity: "Recommendation",
   opportunity: "Opportunity",
   tax: "Tax",
+};
+
+const CRITIQUE_LABEL: Record<string, string> = {
+  critical: "Critical concern",
+  moderate: "Worth weighing",
+  minor: "Minor note",
 };
 
 function timeAgo(dateStr: string) {
@@ -143,9 +150,111 @@ export default function AlertsPage() {
               </button>
 
               {expanded === a.id && (
-                <div className="border-t border-border px-4 pb-4 pt-3">
+                <div className="border-t border-border px-4 pb-4 pt-3 space-y-3">
                   <p className="text-sm text-muted-foreground">{a.message}</p>
-                  <div className="mt-3 flex items-center gap-2">
+
+                  {a.alert_type === "market_event" && a.metadata && (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-muted/30 p-3 text-xs sm:grid-cols-3">
+                      {a.metadata.change_1d_pct != null && (
+                        <div>
+                          <span className="text-muted-foreground">1-day move</span>
+                          <p className="font-medium">{a.metadata.change_1d_pct > 0 ? "+" : ""}{a.metadata.change_1d_pct.toFixed(2)}%</p>
+                        </div>
+                      )}
+                      {a.metadata.change_5d_pct != null && (
+                        <div>
+                          <span className="text-muted-foreground">5-day trend</span>
+                          <p className="font-medium">{a.metadata.change_5d_pct > 0 ? "+" : ""}{a.metadata.change_5d_pct.toFixed(2)}%</p>
+                        </div>
+                      )}
+                      {a.metadata.benchmark?.market_relative_pct != null && (
+                        <div>
+                          <span className="text-muted-foreground">vs NIFTY 50</span>
+                          <p className="font-medium">{a.metadata.benchmark.market_relative_pct > 0 ? "+" : ""}{a.metadata.benchmark.market_relative_pct.toFixed(2)}%</p>
+                        </div>
+                      )}
+                      {a.metadata.benchmark?.industry_relative_pct != null && (
+                        <div>
+                          <span className="text-muted-foreground">vs {a.metadata.benchmark.industry} index</span>
+                          <p className="font-medium">{a.metadata.benchmark.industry_relative_pct > 0 ? "+" : ""}{a.metadata.benchmark.industry_relative_pct.toFixed(2)}%</p>
+                        </div>
+                      )}
+                      {a.metadata.portfolio_weight_pct != null && (
+                        <div>
+                          <span className="text-muted-foreground">Portfolio weight</span>
+                          <p className="font-medium">{a.metadata.portfolio_weight_pct.toFixed(1)}%</p>
+                        </div>
+                      )}
+                      {a.metadata.confidence != null && (
+                        <div>
+                          <span className="text-muted-foreground">Confidence</span>
+                          <p className="font-medium">{Math.round(a.metadata.confidence * 100)}%</p>
+                        </div>
+                      )}
+                      {a.metadata.market_context && (
+                        <div className="col-span-full border-t border-border pt-2">
+                          <span className="text-muted-foreground">Assessment: </span>
+                          <span className="font-medium">
+                            {a.metadata.market_context === "broad_based" ? "Broad market/sector move" : "Company-specific"}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {a.alert_type === "signal_opportunity" && a.metadata?.proposal && (
+                    <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold uppercase tracking-wide text-muted-foreground">
+                          Proposal — not financial advice
+                        </span>
+                        <Badge variant={a.metadata.proposal.action === "sell" || a.metadata.proposal.action === "trim" ? "destructive" : "success"}>
+                          {a.metadata.proposal.action}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+                        <div>
+                          <span className="text-muted-foreground">Amount</span>
+                          <p className="font-medium">₹{a.metadata.proposal.amount_inr.toLocaleString("en-IN")}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Timeline</span>
+                          <p className="font-medium capitalize">{a.metadata.proposal.timeline.replace(/_/g, " ")}</p>
+                        </div>
+                      </div>
+                      <p className="text-muted-foreground">{a.metadata.proposal.reasoning}</p>
+                      {a.metadata.proposal.tax_note && (
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Tax note: </span>{a.metadata.proposal.tax_note}</p>
+                      )}
+
+                      {a.metadata.critique && (
+                        <div className="border-t border-border pt-2">
+                          <p className="font-semibold uppercase tracking-wide text-muted-foreground">
+                            Devil&apos;s advocate — {CRITIQUE_LABEL[a.metadata.critique.overall] ?? a.metadata.critique.overall}
+                          </p>
+                          <p className="mt-1 text-muted-foreground">{a.metadata.critique.strongest_concern}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {a.reasoning && (
+                    <p className="text-xs text-muted-foreground">{a.reasoning}</p>
+                  )}
+
+                  {a.metadata?.news_link && (
+                    <a
+                      href={a.metadata.news_link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      Read the source article <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+
+                  <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">Was this helpful?</span>
                     <button
                       onClick={() => sendFeedback(a.id, "helpful")}

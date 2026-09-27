@@ -14,7 +14,7 @@ from config import settings
 class GroqProvider(BaseLLMProvider):
     """Connects to Groq's free-tier Llama models via the official async client."""
 
-    def __init__(self, model: str = "llama-3.3-70b-versatile", temperature: float = 0.3):
+    def __init__(self, model: str = "openai/gpt-oss-120b", temperature: float = 0.3):
         self.model_name = model
         self.provider_name = "groq"
         self._temperature = temperature

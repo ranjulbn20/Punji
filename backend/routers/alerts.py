@@ -42,10 +42,23 @@ async def list_alerts(
             "user_feedback": a.user_feedback,
             "related_instrument_id": str(a.related_instrument_id) if a.related_instrument_id else None,
             "related_instrument_type": a.related_instrument_type,
+            "metadata": a.metadata_,
             "created_at": a.created_at,
         }
         for a in alerts
     ]
+
+
+@router.post("/refresh-signals")
+async def refresh_signals(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Manually trigger the price+news signal check (dashboard refresh button) —
+    same logic the scheduler runs every few hours during market hours, run on demand."""
+    from agents.proactive_alert import run_market_signal_check_for_user
+    created = await run_market_signal_check_for_user(db, str(user.id))
+    return {"alerts_created": created}
 
 
 @router.put("/{alert_id}/read")

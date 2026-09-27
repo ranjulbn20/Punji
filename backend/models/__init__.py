@@ -15,6 +15,7 @@ from .fund_composition import FundComposition
 from .business_group import BusinessGroupMapping
 from .import_job import ImportJob
 from .conversation import Conversation, ConversationMessage
+from .news_highlight import NewsHighlight
 
 # Legacy — kept until migration drops the table
 from .holding import Holding
@@ -25,6 +26,7 @@ __all__ = [
     "Transaction", "StockTrade", "Goal", "Alert", "AgentMemory", "PortfolioSnapshot",
     "FundComposition", "BusinessGroupMapping", "ImportJob",
     "Conversation", "ConversationMessage",
+    "NewsHighlight",
     "Holding",  # legacy
 ]
 

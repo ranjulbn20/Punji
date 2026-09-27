@@ -25,17 +25,19 @@ from database import AsyncSessionLocal
 # ── in-process run-time tracking ─────────────────────────────────────────────
 
 _last_run: dict[str, datetime | None] = {
-    "snapshots":   None,
-    "alerts":      None,
-    "monte_carlo": None,
-    "amfi":        None,
+    "snapshots":     None,
+    "alerts":        None,
+    "market_signal": None,
+    "monte_carlo":   None,
+    "amfi":          None,
 }
 
 _OVERDUE: dict[str, timedelta] = {
-    "snapshots":   timedelta(hours=25),
-    "alerts":      timedelta(hours=25),
-    "monte_carlo": timedelta(days=8),
-    "amfi":        timedelta(days=32),
+    "snapshots":     timedelta(hours=25),
+    "alerts":        timedelta(hours=25),
+    "market_signal": timedelta(hours=5),  # runs every ~2-3h during market hours
+    "monte_carlo":   timedelta(days=8),
+    "amfi":          timedelta(days=32),
 }
 
 
@@ -125,6 +127,28 @@ async def _run_proactive_alerts() -> None:
         _mark("alerts")
 
 
+async def _run_market_signal_check() -> None:
+    """Every ~2-3h during NSE market hours (9:15am-3:30pm IST) — price+news
+    signal engine (Phase 1). Separate from the once-daily _run_proactive_alerts
+    because a price move can't wait until tomorrow's 8am run."""
+    async with AsyncSessionLocal() as db:
+        from models import User
+        from agents.proactive_alert import run_market_signal_check_for_user
+
+        users_result = await db.execute(
+            select(User).where(User.is_active == True, User.onboarding_step >= 1)
+        )
+        users = users_result.scalars().all()
+
+        for user in users:
+            try:
+                await run_market_signal_check_for_user(db, str(user.id))
+            except Exception as e:
+                print(f"[Scheduler] Market signal check error for user {user.id}: {e}")
+
+        _mark("market_signal")
+
+
 async def _run_monte_carlo_weekly() -> None:
     """Weekly Sunday 02:00 IST — Monte Carlo simulation for all active goals."""
     async with AsyncSessionLocal() as db:
@@ -181,6 +205,10 @@ async def _watchdog() -> None:
         print("[Scheduler] Watchdog: alerts overdue — running now")
         await _run_proactive_alerts()
 
+    if _is_overdue("market_signal"):
+        print("[Scheduler] Watchdog: market signal check overdue — running now")
+        await _run_market_signal_check()
+
     if _is_overdue("monte_carlo"):
         print("[Scheduler] Watchdog: Monte Carlo overdue — running now")
         await _run_monte_carlo_weekly()
@@ -219,6 +247,8 @@ async def seed_last_run_from_db() -> None:
     now = datetime.now(timezone.utc)
     if _last_run["alerts"] is None:
         _last_run["alerts"] = now - timedelta(hours=12)
+    if _last_run["market_signal"] is None:
+        _last_run["market_signal"] = now - timedelta(hours=2)
     if _last_run["monte_carlo"] is None:
         _last_run["monte_carlo"] = now - timedelta(days=4)
     if _last_run["amfi"] is None:
@@ -243,6 +273,12 @@ def create_scheduler() -> AsyncIOScheduler:
         CronTrigger(hour=8, minute=0),
         misfire_grace_time=300,
         id="alerts",
+    )
+    scheduler.add_job(
+        _run_market_signal_check,
+        CronTrigger(day_of_week="mon-fri", hour="10,12,14,15", minute=0),
+        misfire_grace_time=300,
+        id="market_signal",
     )
     scheduler.add_job(
         _run_monte_carlo_weekly,

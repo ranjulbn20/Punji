@@ -9,7 +9,7 @@ from services.auth_service import decode_token
 from services.websocket_service import manager
 from scheduler.jobs import create_scheduler
 
-from routers import auth, holdings, transactions, goals, alerts, portfolio, market, imports, agent, scenarios
+from routers import auth, holdings, transactions, goals, alerts, portfolio, market, imports, agent, scenarios, news
 
 
 @asynccontextmanager
@@ -46,6 +46,7 @@ app.include_router(market.router)
 app.include_router(imports.router)
 app.include_router(agent.router)
 app.include_router(scenarios.router)
+app.include_router(news.router)
 
 
 @app.get("/health")
