@@ -14,6 +14,32 @@ Punji is an autonomous personal finance agent built for Indian retail investors.
 
 ---
 
+## Screenshots
+
+### Dashboard
+
+![Dashboard overview](docs/screenshots/dashboard-overview.png)
+
+Portfolio Overview: total value, invested amount, unrealised P&L, and portfolio XIRR at a glance, a 1-year performance chart, and an asset-allocation donut broken down by equity/debt/gold/cash/real estate/alternative.
+
+![Dashboard — Recent Alerts and News](docs/screenshots/dashboard-alerts-news.png)
+
+Further down: the **Recent Alerts** card (with a manual refresh button that triggers the signal engine on demand) showing severity-badged, emoji-coded market-event alerts; the **News** card (Google News RSS-sourced, per-holding, with direct source links); and **Quick Actions** for common tasks.
+
+### Holdings
+
+![Holdings page](docs/screenshots/holdings.png)
+
+Tab-filtered by instrument type (Mutual Fund shown here, with Stock/FD/PPF/NPS alongside), summary stat cards, and a sortable table with expandable rows, per-holding refresh, and CSV import.
+
+### Alerts
+
+![Alert detail view](docs/screenshots/alerts-detail.png)
+
+An expanded `market_event` alert, showing the full evidence readout the signal engine stores: 1-day move, 5-day trend, performance relative to NIFTY 50 and the holding's industry index, portfolio weight, model confidence, and a plain-English assessment ("Broad market/sector move" here — CDSL's dividend news read as broadly positive by the LLM, but the price move itself tracked the wider market rather than being company-specific). The raw evidence trail, source article link, and thumbs up/down feedback are all visible without leaving the inbox.
+
+---
+
 ## Features
 
 ### Portfolio Tracking
