@@ -89,7 +89,7 @@ async def _compute_hidden_exposure(db, holdings, total, isin_to_group) -> list[d
             isin = h.metadata_.get("isin", "")
             if not isin:
                 continue
-            pct = h.current_value / total * 100
+            pct = float(h.current_value / total * 100)
             key = isin
             if key not in exposure_map:
                 exposure_map[key] = {
@@ -117,7 +117,7 @@ async def _compute_hidden_exposure(db, holdings, total, isin_to_group) -> list[d
         if not scheme_code:
             continue
 
-        fund_pct = h.current_value / total
+        fund_pct = float(h.current_value / total)
 
         comp_result = await db.execute(
             select(FundComposition)
@@ -155,7 +155,7 @@ async def _compute_hidden_exposure(db, holdings, total, isin_to_group) -> list[d
         if h.instrument_type != "fixed_deposit":
             continue
         bank_name = h.metadata_.get("bank_name", "")
-        fd_pct = h.current_value / total * 100
+        fd_pct = float(h.current_value / total * 100)
 
         # Check if user also holds equity of same institution
         has_equity_overlap = any(

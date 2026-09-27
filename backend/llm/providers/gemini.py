@@ -1,12 +1,12 @@
 """
-Google Gemini provider via AI Studio API key.
+Google Gemini provider via AI Studio API key, using the unified google-genai SDK.
 Used for local development — free tier at aistudio.google.com.
 """
 
-import asyncio
 import json
 import re
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from llm.base import BaseLLMProvider, LLMResponse
@@ -19,22 +19,22 @@ class GeminiProvider(BaseLLMProvider):
     Free for local development. Rate limits apply on free tier.
     """
 
-    def __init__(self, model: str = "gemini-1.5-pro", temperature: float = 0.3):
+    def __init__(self, model: str = "gemini-flash-latest", temperature: float = 0.3):
         self.model_name = model
         self.provider_name = "gemini"
         self._temperature = temperature
+        self._client = genai.Client(api_key=settings.google_ai_api_key)
 
-        genai.configure(api_key=settings.google_ai_api_key)
-        self._client = genai.GenerativeModel(
-            model_name=model,
-            generation_config=genai.GenerationConfig(temperature=temperature),
+    async def generate(self, prompt: str, temperature: float = None, use_search: bool = False) -> LLMResponse:
+        t = temperature if temperature is not None else self._temperature
+        config = types.GenerateContentConfig(
+            temperature=t,
+            tools=[types.Tool(google_search=types.GoogleSearch())] if use_search else None,
         )
-
-    async def generate(self, prompt: str, temperature: float = None) -> LLMResponse:
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self._client.generate_content(prompt),
+        response = await self._client.aio.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config=config,
         )
         return LLMResponse(
             content=response.text,
@@ -42,13 +42,13 @@ class GeminiProvider(BaseLLMProvider):
             provider=self.provider_name,
         )
 
-    async def generate_json(self, prompt: str, temperature: float = 0.1) -> dict:
+    async def generate_json(self, prompt: str, temperature: float = 0.1, use_search: bool = False) -> dict:
         json_prompt = (
             f"{prompt}\n\n"
             "IMPORTANT: Return only valid JSON. No explanation, no markdown, no code fences.\n"
             "Start your response with { and end with }."
         )
-        response = await self.generate(json_prompt, temperature=temperature)
+        response = await self.generate(json_prompt, temperature=temperature, use_search=use_search)
         return _parse_json(response.content)
 
     def as_langchain_llm(self):

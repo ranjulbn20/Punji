@@ -73,10 +73,10 @@ connectors/  → Broker API connectors (stubs only — not implemented)
 
 **LLM abstraction layer** (`llm/`):
 - `llm/registry.py` is the **only file to edit when swapping models** — assigns a provider instance to each of the 8 agent roles
-- `llm/base.py` — `BaseLLMProvider` ABC with `generate()`, `generate_json()`, `as_langchain_llm()`
-- `llm/providers/gemini.py` — Google AI Studio API key (local dev, free)
-- `llm/providers/vertex.py` — Vertex AI (production on Cloud Run, no key needed)
-- `llm/providers/anthropic.py` — Claude (optional swap-in, not default)
+- `llm/base.py` — `BaseLLMProvider` ABC with `generate()`, `generate_json()`, `as_langchain_llm()`. Both `generate()` and `generate_json()` take a `use_search: bool = False` param that grounds the response in live Google Search results where the provider supports it.
+- `llm/providers/gemini.py` — Google AI Studio API key (local dev, free). Uses the unified `google-genai` SDK (`google.generativeai` is deprecated — do not reintroduce it).
+- `llm/providers/vertex.py` — Vertex AI (production on Cloud Run, no key needed). Same unified `google-genai` SDK, instantiated with `vertexai=True`.
+- `llm/providers/anthropic.py` — Claude (optional swap-in, not default). `use_search` is accepted for interface compatibility but not implemented — ignored rather than raising.
 - When `ENVIRONMENT=production`, registry auto-routes to VertexAI; otherwise uses GeminiProvider
 - Agents import `from llm import ORCHESTRATOR` etc. — zero direct SDK imports in agent files
 
@@ -87,7 +87,7 @@ connectors/  → Broker API connectors (stubs only — not implemented)
 4. `synthesise_response()` — generates the final user-facing answer from accumulated state
 
 **Agent roles and model assignments** (in `llm/registry.py`):
-- `ORCHESTRATOR`, `RECOMMENDATION`, `MARKET_INTELLIGENCE` → `gemini-1.5-pro` (user-facing, best quality)
+- `ORCHESTRATOR`, `RECOMMENDATION`, `MARKET_INTELLIGENCE` → `gemini-flash-latest` (user-facing; the `-latest` alias auto-tracks Google's newest Flash release). `MARKET_INTELLIGENCE` and `RECOMMENDATION` call with `use_search=True` for live-grounded answers.
 - `DEVIL_ADVOCATE`, `PROACTIVE_ALERT`, `NEWS_INTELLIGENCE`, `GOAL_TRACKER`, `CONCENTRATION_RISK` → `gemini-1.5-flash` (background, fast/cheap)
 
 **Market data:** `services/market_service.py` fetches MF NAVs from MFAPI.in (no key needed, 4h Redis TTL) and stock prices from yfinance (15min TTL). Redis keys follow `nav:{scheme_code}` and `stock:{symbol}` patterns.

@@ -27,10 +27,10 @@ def _auto(model: str, temperature: float = 0.3) -> BaseLLMProvider:
 # AGENT MODEL ASSIGNMENTS — change any line here to swap a model
 # ============================================================
 
-# User-facing agents — Pro for best reasoning quality
-ORCHESTRATOR:        BaseLLMProvider = _auto("gemini-1.5-pro",   temperature=0.3)
-RECOMMENDATION:      BaseLLMProvider = _auto("gemini-1.5-pro",   temperature=0.3)
-MARKET_INTELLIGENCE: BaseLLMProvider = _auto("gemini-1.5-pro",   temperature=0.2)
+# User-facing agents — flash-latest always tracks Google's newest Flash release
+ORCHESTRATOR:        BaseLLMProvider = _auto("gemini-flash-latest", temperature=0.3)
+RECOMMENDATION:      BaseLLMProvider = _auto("gemini-flash-latest", temperature=0.3)
+MARKET_INTELLIGENCE: BaseLLMProvider = _auto("gemini-flash-latest", temperature=0.2)
 
 # Background agents — Flash for speed and cost
 DEVIL_ADVOCATE:      BaseLLMProvider = _auto("gemini-1.5-flash", temperature=0.2)

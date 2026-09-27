@@ -25,7 +25,9 @@ class AnthropicProvider(BaseLLMProvider):
         self._temperature = temperature
         self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-    async def generate(self, prompt: str, temperature: float = None) -> LLMResponse:
+    async def generate(self, prompt: str, temperature: float = None, use_search: bool = False) -> LLMResponse:
+        # use_search is not implemented for this provider — ignored rather than raising,
+        # so an agent's use_search=True call still degrades to an ungrounded response.
         t = temperature if temperature is not None else self._temperature
         message = await self._client.messages.create(
             model=self.model_name,
@@ -41,13 +43,13 @@ class AnthropicProvider(BaseLLMProvider):
             output_tokens=message.usage.output_tokens,
         )
 
-    async def generate_json(self, prompt: str, temperature: float = 0.1) -> dict:
+    async def generate_json(self, prompt: str, temperature: float = 0.1, use_search: bool = False) -> dict:
         json_prompt = (
             f"{prompt}\n\n"
             "IMPORTANT: Return only valid JSON. No explanation, no markdown, no code fences.\n"
             "Start your response with { and end with }."
         )
-        response = await self.generate(json_prompt, temperature=temperature)
+        response = await self.generate(json_prompt, temperature=temperature, use_search=use_search)
         return _parse_json(response.content)
 
     def as_langchain_llm(self):

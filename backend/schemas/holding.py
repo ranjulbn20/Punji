@@ -56,3 +56,22 @@ class HoldingOut(BaseModel):
             last_refreshed_at=h.last_refreshed_at,
             created_at=h.created_at,
         )
+
+
+class PaginatedHoldingsOut(BaseModel):
+    items: list[HoldingOut]
+    next_cursor: str | None
+
+
+class HoldingTypeSummary(BaseModel):
+    instrument_type: str
+    count: int
+    invested_amount: float
+    current_value: float
+    unrealised_pnl: float
+    xirr: float | None
+
+
+class HoldingsSummaryOut(BaseModel):
+    by_type: list[HoldingTypeSummary]
+    total: HoldingTypeSummary

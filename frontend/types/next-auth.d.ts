@@ -5,12 +5,14 @@ declare module "next-auth" {
     backendAccessToken: string;
     isNewUser: boolean;
     backendUser?: { id: string; email: string; full_name?: string; onboarding_step: number };
+    backendError?: "backend_unreachable" | "backend_rejected";
   }
   interface User {
     backendAccessToken: string;
     backendRefreshToken: string;
     isNewUser: boolean;
     backendUser?: { id: string; email: string; full_name?: string; onboarding_step: number };
+    backendError?: "backend_unreachable" | "backend_rejected";
   }
 }
 
@@ -20,5 +22,6 @@ declare module "next-auth/jwt" {
     backendRefreshToken: string;
     isNewUser: boolean;
     backendUser?: { id: string; email: string; full_name?: string; onboarding_step: number };
+    backendError?: "backend_unreachable" | "backend_rejected";
   }
 }

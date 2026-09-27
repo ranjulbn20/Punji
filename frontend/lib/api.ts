@@ -79,9 +79,9 @@ export const api = {
   },
 
   holdings: {
-    list: (filters?: { instrument_type?: string; asset_class?: string }) => {
-      const q = new URLSearchParams(filters as Record<string, string>);
-      return apiFetch<Holding[]>(`/api/holdings?${q}`);
+    list: (filters?: { instrument_type?: string; asset_class?: string; cursor?: string; limit?: number }) => {
+      const q = new URLSearchParams(filters as unknown as Record<string, string>);
+      return apiFetch<PaginatedHoldings>(`/api/holdings?${q}`);
     },
     get: (id: string) => apiFetch<Holding>(`/api/holdings/${id}`),
     create: (data: Partial<Holding>) =>
@@ -90,6 +90,7 @@ export const api = {
       apiFetch<Holding>(`/api/holdings/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     delete: (id: string) => apiFetch(`/api/holdings/${id}`, { method: "DELETE" }),
     refresh: (id: string) => apiFetch(`/api/holdings/${id}/refresh`, { method: "POST" }),
+    summary: () => apiFetch<HoldingsSummary>("/api/holdings/summary"),
   },
 
   transactions: {
@@ -205,6 +206,9 @@ export function streamChat(
 // Types (minimal)
 export interface User { id: string; email: string; full_name?: string; onboarding_step: number; }
 export interface Holding { id: string; instrument_type: string; display_name: string; asset_class: string; invested_amount: number; current_value: number; unrealised_pnl: number; xirr?: number; metadata_: object; }
+export interface PaginatedHoldings { items: Holding[]; next_cursor: string | null; }
+export interface HoldingTypeSummary { instrument_type: string; count: number; invested_amount: number; current_value: number; unrealised_pnl: number; xirr: number | null; }
+export interface HoldingsSummary { by_type: HoldingTypeSummary[]; total: HoldingTypeSummary; }
 export interface Transaction { id: string; holding_id: string; transaction_date: string; transaction_type: string; amount: number; units?: number; price?: number; }
 export interface Goal { id: string; name: string; target_amount: number; target_date: string; success_probability?: number; monthly_sip_allocated: number; }
 export interface Alert { id: string; alert_type: string; severity: string; title: string; message: string; is_read: boolean; created_at: string; }

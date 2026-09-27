@@ -45,7 +45,7 @@ Rules:
 - If no action is needed, use action="hold" with reasoning."""
 
     try:
-        proposal = await RECOMMENDATION.generate_json(prompt)
+        proposal = await RECOMMENDATION.generate_json(prompt, use_search=True)
     except Exception as e:
         proposal = {
             "action": "hold",

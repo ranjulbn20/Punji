@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,10 +17,19 @@ const schema = z.object({
 });
 type Form = z.infer<typeof schema>;
 
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  backend_unreachable: "We couldn't reach the Punji server to finish signing you in. Please check that it's running and try again.",
+  backend_rejected: "Google sign-in didn't go through. Please try again, or sign in with email and password.",
+};
+
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { setAuth } = usePunji();
-  const [error, setError] = useState("");
+  const oauthErrorCode = searchParams.get("error");
+  const [error, setError] = useState(
+    oauthErrorCode ? OAUTH_ERROR_MESSAGES[oauthErrorCode] ?? "Sign-in failed. Please try again." : ""
+  );
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<Form>({
     resolver: zodResolver(schema),
   });
@@ -47,6 +56,12 @@ export default function LoginPage() {
           <p className="mt-2 text-sm text-muted-foreground">Your autonomous finance agent</p>
         </div>
 
+        {error && (
+          <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+        )}
+
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1">
             <Label htmlFor="email">Email</Label>
@@ -59,8 +74,6 @@ export default function LoginPage() {
             <Input id="password" type="password" placeholder="••••••••" {...register("password")} />
             {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
           </div>
-
-          {error && <p className="text-sm text-destructive">{error}</p>}
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? "Signing in…" : "Sign in"}

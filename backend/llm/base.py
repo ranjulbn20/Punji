@@ -29,12 +29,12 @@ class BaseLLMProvider(ABC):
     model_name: str
 
     @abstractmethod
-    async def generate(self, prompt: str, temperature: float = 0.3) -> LLMResponse:
-        """Single-turn generation."""
+    async def generate(self, prompt: str, temperature: float = 0.3, use_search: bool = False) -> LLMResponse:
+        """Single-turn generation. use_search grounds the response in live web results where supported."""
         pass
 
     @abstractmethod
-    async def generate_json(self, prompt: str, temperature: float = 0.1) -> dict:
+    async def generate_json(self, prompt: str, temperature: float = 0.1, use_search: bool = False) -> dict:
         """
         Generate and parse JSON response.
         Prompt must instruct the model to return only valid JSON.

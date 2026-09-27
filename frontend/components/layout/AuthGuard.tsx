@@ -1,7 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { usePunji } from "@/store";
 import AppShell from "@/components/layout/AppShell";
 
@@ -14,6 +14,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const backendToken = (session?.user as any)?.backendAccessToken;
   const backendRefreshToken = (session?.user as any)?.backendRefreshToken;
   const backendUser = (session?.user as any)?.backendUser;
+  const backendError = (session?.user as any)?.backendError;
 
   useEffect(() => {
     if (status === "loading") return;
@@ -33,8 +34,18 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (!user) router.replace("/login");
-  }, [user, backendToken, backendRefreshToken, backendUser, status, router, pathname, setAuth]);
+    if (!user) {
+      if (status === "authenticated" && backendError) {
+        // Google sign-in succeeded but the Punji backend exchange failed — clear the
+        // half-signed-in NextAuth session so the user gets a clean retry, and surface why.
+        signOut({ redirect: false }).then(() => {
+          router.replace(`/login?error=${backendError}`);
+        });
+        return;
+      }
+      router.replace("/login");
+    }
+  }, [user, backendToken, backendRefreshToken, backendUser, backendError, status, router, pathname, setAuth]);
 
   // Wait while NextAuth is loading or we're mid-sync (no Zustand user yet)
   if (status === "loading" || (!user && backendToken)) return null;

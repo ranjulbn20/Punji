@@ -26,9 +26,14 @@ const { handlers } = NextAuth({
             token.backendRefreshToken = data.refresh_token;
             token.isNewUser = data.is_new_user;
             token.backendUser = data.user;
+            token.backendError = undefined;
+          } else {
+            // Backend reachable but rejected the exchange (e.g. invalid Google token).
+            token.backendError = "backend_rejected";
           }
         } catch {
-          // token stays empty; AuthGuard will redirect to /login
+          // Backend unreachable (down, DB down, network issue, etc).
+          token.backendError = "backend_unreachable";
         }
       }
       return token;
@@ -40,6 +45,7 @@ const { handlers } = NextAuth({
         (session.user as any).backendRefreshToken = token.backendRefreshToken;
         (session.user as any).isNewUser = token.isNewUser;
         (session.user as any).backendUser = token.backendUser;
+        (session.user as any).backendError = token.backendError;
       }
       return session;
     },

@@ -15,7 +15,7 @@ RBI Repo Rate: {macro.get('repo_rate', 6.5)}%
 Be factual and concise. No recommendations — just context."""
 
     try:
-        response = await MARKET_INTELLIGENCE.generate(prompt)
+        response = await MARKET_INTELLIGENCE.generate(prompt, use_search=True)
         narrative = response.content
     except Exception:
         narrative = f"Nifty 50 at {macro.get('nifty50_level', 'N/A')}. RBI repo rate at {macro.get('repo_rate', 6.5)}%."

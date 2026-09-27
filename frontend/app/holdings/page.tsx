@@ -1,25 +1,34 @@
 "use client";
 import React, { useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { RefreshCw, Plus, Upload, Trash2, ChevronDown, ChevronUp, ArrowLeft } from "lucide-react";
-import { api, type Holding } from "@/lib/api";
+import { RefreshCw, Plus, Upload, Trash2, ChevronDown, ChevronUp, ArrowLeft, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { api, type Holding, type HoldingsSummary, type HoldingTypeSummary } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-const TABS = ["All", "Mutual Fund", "Stock", "Fixed Deposit", "PPF", "NPS"] as const;
+const TABS = ["Mutual Fund", "Stock", "Fixed Deposit", "PPF", "NPS"] as const;
 type Tab = (typeof TABS)[number];
 
-const TAB_FILTER: Record<Tab, string | undefined> = {
-  All: undefined,
+const TAB_FILTER: Record<Tab, string> = {
   "Mutual Fund": "mutual_fund",
   Stock: "stock",
   "Fixed Deposit": "fixed_deposit",
   PPF: "ppf",
   NPS: "nps",
 };
+
+type SortKey = "display_name" | "invested_amount" | "current_value" | "unrealised_pnl" | "xirr";
+
+const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
+  { key: "display_name", label: "Name" },
+  { key: "invested_amount", label: "Invested", className: "text-right" },
+  { key: "current_value", label: "Current", className: "text-right" },
+  { key: "unrealised_pnl", label: "P&L", className: "text-right hidden sm:table-cell" },
+  { key: "xirr", label: "XIRR", className: "text-right hidden lg:table-cell" },
+];
 
 function fmt(n: number) {
   if (n >= 1_00_00_000) return `₹${(n / 1_00_00_000).toFixed(2)} Cr`;
@@ -115,9 +124,10 @@ interface PreviewData {
 
 export default function HoldingsPage() {
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<Tab>("All");
+  const [tab, setTab] = useState<Tab>("Mutual Fund");
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<HoldingsSummary | null>(null);
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [importStep, setImportStep] = useState<ImportStep>(
     searchParams.get("import") === "true" ? "select_type" : "idle"
@@ -126,6 +136,8 @@ export default function HoldingsPage() {
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformConfig | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pdfPassword, setPdfPassword] = useState("");
   const [passwordError, setPasswordError] = useState(false);
@@ -135,25 +147,33 @@ export default function HoldingsPage() {
     setLoading(true);
     try {
       const data = await api.holdings.list(instrumentType ? { instrument_type: instrumentType } : undefined);
-      setHoldings(data);
+      setHoldings(data.items);
     } catch {}
     finally { setLoading(false); }
+  }
+
+  async function loadSummary() {
+    try { setSummary(await api.holdings.summary()); } catch {}
   }
 
   useEffect(() => {
     loadHoldings(TAB_FILTER[tab]);
   }, [tab]);
 
+  useEffect(() => {
+    loadSummary();
+  }, []);
+
   async function refreshHolding(id: string) {
     setRefreshing(id);
-    try { await api.holdings.refresh(id); await loadHoldings(TAB_FILTER[tab]); }
+    try { await api.holdings.refresh(id); await loadHoldings(TAB_FILTER[tab]); await loadSummary(); }
     catch {}
     finally { setRefreshing(null); }
   }
 
   async function deleteHolding(id: string) {
     if (!confirm("Remove this holding?")) return;
-    try { await api.holdings.delete(id); setHoldings((h) => h.filter((x) => x.id !== id)); }
+    try { await api.holdings.delete(id); setHoldings((h) => h.filter((x) => x.id !== id)); await loadSummary(); }
     catch {}
   }
 
@@ -204,10 +224,41 @@ export default function HoldingsPage() {
       await api.imports.confirm(preview.job_id, { confirmed: true });
       setImportStep("done");
       await loadHoldings(TAB_FILTER[tab]);
+      await loadSummary();
     } catch { setImportStep("preview"); }
   }
 
   const filtered = holdings;
+
+  const currentSummary: HoldingTypeSummary | undefined = summary?.by_type.find(
+    (s) => s.instrument_type === TAB_FILTER[tab]
+  );
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
+
+  const sorted = React.useMemo(() => {
+    if (!sortKey) return filtered;
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      // Nulls (e.g. missing XIRR) always sort last, regardless of direction.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" || typeof bv === "string") {
+        return String(av).localeCompare(String(bv)) * dir;
+      }
+      return ((av as number) - (bv as number)) * dir;
+    });
+  }, [filtered, sortKey, sortDir]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -439,6 +490,47 @@ export default function HoldingsPage() {
         ))}
       </div>
 
+      {/* ── Section summary ── */}
+      {currentSummary && currentSummary.count > 0 && (
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+          <div className="rounded-xl border border-border bg-card px-4 py-3">
+            <p className="text-xs text-muted-foreground">Holdings</p>
+            <p className="mt-0.5 text-lg font-semibold tabular-nums">{currentSummary.count}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card px-4 py-3">
+            <p className="text-xs text-muted-foreground">Invested</p>
+            <p className="mt-0.5 text-lg font-semibold tabular-nums">{fmt(currentSummary.invested_amount)}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card px-4 py-3">
+            <p className="text-xs text-muted-foreground">Current Value</p>
+            <p className="mt-0.5 text-lg font-semibold tabular-nums">{fmt(currentSummary.current_value)}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card px-4 py-3">
+            <p className="text-xs text-muted-foreground">P&amp;L</p>
+            <p className={cn(
+              "mt-0.5 text-lg font-semibold tabular-nums",
+              currentSummary.unrealised_pnl >= 0 ? "text-green-400" : "text-red-400"
+            )}>
+              {currentSummary.unrealised_pnl >= 0 ? "+" : ""}{fmt(currentSummary.unrealised_pnl)}
+              {currentSummary.invested_amount > 0 && (
+                <span className="ml-1 text-sm font-normal">
+                  ({((currentSummary.unrealised_pnl / currentSummary.invested_amount) * 100).toFixed(1)}%)
+                </span>
+              )}
+            </p>
+          </div>
+          <div className="rounded-xl border border-border bg-card px-4 py-3">
+            <p className="text-xs text-muted-foreground">XIRR</p>
+            <p className={cn(
+              "mt-0.5 text-lg font-semibold tabular-nums",
+              currentSummary.xirr == null ? "" : currentSummary.xirr >= 0 ? "text-green-400" : "text-red-400"
+            )}>
+              {currentSummary.xirr != null ? `${currentSummary.xirr >= 0 ? "+" : ""}${currentSummary.xirr.toFixed(1)}%` : "—"}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ── Holdings table ── */}
       {loading ? (
         <div className="space-y-3">
@@ -457,17 +549,29 @@ export default function HoldingsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-card text-left text-xs text-muted-foreground">
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3 hidden md:table-cell">Type</th>
-                <th className="px-4 py-3 text-right">Invested</th>
-                <th className="px-4 py-3 text-right">Current</th>
-                <th className="px-4 py-3 text-right hidden sm:table-cell">P&L</th>
-                <th className="px-4 py-3 text-right hidden lg:table-cell">XIRR</th>
+                {COLUMNS.map((col) => (
+                  <th key={col.key} className={cn("px-4 py-3", col.className)}>
+                    <button
+                      onClick={() => toggleSort(col.key)}
+                      className={cn(
+                        "inline-flex items-center gap-1 hover:text-foreground",
+                        col.className?.includes("text-right") && "flex-row-reverse"
+                      )}
+                    >
+                      {col.label}
+                      {sortKey === col.key ? (
+                        sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="h-3 w-3 opacity-40" />
+                      )}
+                    </button>
+                  </th>
+                ))}
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
-              {filtered.map((h) => {
+              {sorted.map((h) => {
                 const gain = h.unrealised_pnl >= 0;
                 const pnlPct = h.invested_amount > 0 ? (h.unrealised_pnl / h.invested_amount) * 100 : 0;
                 return (
@@ -484,11 +588,6 @@ export default function HoldingsPage() {
                           }
                           <span className="font-medium">{h.display_name}</span>
                         </div>
-                      </td>
-                      <td className="px-4 py-3 hidden md:table-cell">
-                        <Badge variant="outline" className="capitalize text-xs">
-                          {h.instrument_type?.replace(/_/g, " ")}
-                        </Badge>
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">{fmt(h.invested_amount)}</td>
                       <td className="px-4 py-3 text-right tabular-nums font-medium">{fmt(h.current_value)}</td>
@@ -525,7 +624,7 @@ export default function HoldingsPage() {
                     </tr>
                     {expandedId === h.id && (
                       <tr key={`${h.id}-exp`} className="bg-muted/20">
-                        <td colSpan={7} className="px-8 py-4">
+                        <td colSpan={6} className="px-8 py-4">
                           <div className="grid gap-3 text-xs sm:grid-cols-2 md:grid-cols-3">
                             <div>
                               <p className="text-muted-foreground">Asset Class</p>

@@ -6,33 +6,65 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from database import get_db
-from models import User, Stock, StockTrade, INSTRUMENT_MODEL_MAP
-from schemas.holding import HoldingCreate, HoldingUpdate, HoldingOut
+from models import User, Stock, StockTrade
+from schemas.holding import (
+    HoldingCreate, HoldingUpdate, HoldingOut,
+    PaginatedHoldingsOut, HoldingTypeSummary, HoldingsSummaryOut,
+)
 from dependencies import get_current_user
 from services.instrument_service import (
-    get_all_instruments, get_instrument_by_id, build_instrument_from_dto,
+    get_instrument_by_id, build_instrument_from_dto,
+    get_instruments_page, get_holdings_summary,
 )
 from services.portfolio_service import compute_instrument_xirr
 
 router = APIRouter(prefix="/api/holdings", tags=["holdings"])
 
 
-@router.get("", response_model=list[HoldingOut])
+@router.get("", response_model=PaginatedHoldingsOut)
 async def list_holdings(
     instrument_type: str | None = Query(None),
     asset_class: str | None = Query(None),
+    cursor: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if instrument_type:
-        instruments = await _list_by_type(db, user.id, instrument_type)
-    else:
-        instruments = await get_all_instruments(db, user.id)
+    items, next_cursor = await get_instruments_page(
+        db, user.id,
+        instrument_type=instrument_type,
+        asset_class=asset_class,
+        cursor=cursor,
+        limit=limit,
+    )
+    return PaginatedHoldingsOut(
+        items=[HoldingOut.from_orm_holding(h) for h in items],
+        next_cursor=next_cursor,
+    )
 
-    if asset_class:
-        instruments = [h for h in instruments if h.asset_class == asset_class]
 
-    return [HoldingOut.from_orm_holding(h) for h in instruments]
+@router.get("/summary", response_model=HoldingsSummaryOut)
+async def holdings_summary(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    by_type = await get_holdings_summary(db, user.id)
+
+    total_count = sum(s["count"] for s in by_type)
+    total_invested = sum(s["invested_amount"] for s in by_type)
+    total_current = sum(s["current_value"] for s in by_type)
+    xirr_num = sum(s["xirr"] * s["current_value"] for s in by_type if s["xirr"] is not None)
+    xirr_den = sum(s["current_value"] for s in by_type if s["xirr"] is not None)
+
+    total = HoldingTypeSummary(
+        instrument_type="all",
+        count=total_count,
+        invested_amount=total_invested,
+        current_value=total_current,
+        unrealised_pnl=total_current - total_invested,
+        xirr=(xirr_num / xirr_den) if xirr_den else None,
+    )
+    return HoldingsSummaryOut(by_type=[HoldingTypeSummary(**s) for s in by_type], total=total)
 
 
 @router.get("/{holding_id}")
@@ -167,15 +199,3 @@ async def list_stock_trades(
         }
         for t in trades
     ]
-
-
-# ── Internal helper ───────────────────────────────────────────────────────────
-
-async def _list_by_type(db, user_id, instrument_type: str):
-    model = INSTRUMENT_MODEL_MAP.get(instrument_type)
-    if not model:
-        return []
-    result = await db.execute(
-        select(model).where(model.user_id == user_id, model.is_active == True)
-    )
-    return result.scalars().all()
